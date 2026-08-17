@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: fresh-store
+    env: python
+    plan: free
+    region: oregon
+
+    buildCommand: pip install -r requirements.txt
+
+    startCommand: gunicorn -k uvicorn.workers.UvicornWorker app.main:app
+
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+
+      - key: APP_SECRET_KEY
+        sync: false
+
+      - key: ADMIN_USERNAME
+        value: admin
+
+      - key: ADMIN_PASSWORD
+        sync: false
+
+      - key: APP_ENV
+        value: production
+
+      - key: COOKIE_SECURE
+        value: true

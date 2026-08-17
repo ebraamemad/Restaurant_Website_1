@@ -1,0 +1,15 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<h1 class="mb-5 text-2xl font-bold">إعدادات المحل</h1>
+<form method="post" enctype="multipart/form-data" class="grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-2">
+  <input name="store_name" value="{{ settings.store_name }}" required class="rounded border px-3 py-2" placeholder="اسم المحل">
+  <input name="whatsapp_number" value="{{ settings.whatsapp_number }}" required class="rounded border px-3 py-2" placeholder="رقم واتساب">
+  <input name="phone_number" value="{{ settings.phone_number or '' }}" class="rounded border px-3 py-2" placeholder="رقم الهاتف">
+  <input name="currency" value="{{ settings.currency }}" class="rounded border px-3 py-2" placeholder="العملة">
+  <input name="address" value="{{ settings.address or '' }}" class="rounded border px-3 py-2 md:col-span-2" placeholder="العنوان">
+  <input name="working_hours" value="{{ settings.working_hours or '' }}" class="rounded border px-3 py-2 md:col-span-2" placeholder="مواعيد العمل">
+  <label class="text-sm font-semibold">اللوجو<input name="logo" type="file" accept="image/*" class="mt-1 w-full rounded border px-3 py-2"></label>
+  <label class="text-sm font-semibold">البنر<input name="banner" type="file" accept="image/*" class="mt-1 w-full rounded border px-3 py-2"></label>
+  <button class="rounded bg-slate-900 px-4 py-2 font-bold text-white md:col-span-2">حفظ الإعدادات</button>
+</form>
+{% endblock %}

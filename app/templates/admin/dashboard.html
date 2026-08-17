@@ -1,0 +1,59 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<h1 class="mb-5 text-2xl font-bold">الرئيسية</h1>
+<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+  <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4"><p class="text-xs text-slate-500 sm:text-sm">طلبات اليوم</p><p class="text-xl font-bold sm:text-2xl">{{ today_orders }}</p></div>
+  <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4"><p class="text-xs text-slate-500 sm:text-sm">طلبات الأسبوع</p><p class="text-xl font-bold sm:text-2xl">{{ week_orders }}</p></div>
+  <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4"><p class="text-xs text-slate-500 sm:text-sm">طلبات الشهر</p><p class="text-xl font-bold sm:text-2xl">{{ month_orders }}</p></div>
+  <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4"><p class="text-xs text-slate-500 sm:text-sm">المبيعات المسلمة</p><p class="text-xl font-bold sm:text-2xl">{{ total_sales }}</p></div>
+  <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4"><p class="text-xs text-slate-500 sm:text-sm">العملاء</p><p class="text-xl font-bold sm:text-2xl">{{ customers_count }}</p></div>
+</div>
+<div class="mt-4 grid gap-3 lg:grid-cols-[1.3fr_0.7fr]">
+  <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+    <h2 class="mb-2 text-base font-bold sm:text-lg">نظرة سريعة</h2>
+    <p class="text-sm text-slate-600">يمكنك متابعة الطلبات الجديدة والتعامل معها من نفس الصفحة.</p>
+  </div>
+  <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+    <h2 class="mb-2 text-base font-bold sm:text-lg">إجراءات سريعة</h2>
+    <div class="flex flex-wrap gap-2">
+      <a href="/admin/products" class="rounded-full bg-emerald-600 px-2.5 py-2 text-xs font-semibold text-white sm:px-3 sm:text-sm">إدارة المنتجات</a>
+      <a href="/admin/orders" class="rounded-full bg-slate-800 px-2.5 py-2 text-xs font-semibold text-white sm:px-3 sm:text-sm">الطلبات</a>
+      <a href="/admin/settings" class="rounded-full bg-slate-200 px-2.5 py-2 text-xs font-semibold text-slate-700 sm:px-3 sm:text-sm">الإعدادات</a>
+    </div>
+  </div>
+</div>
+<div class="mt-4 grid gap-3 lg:grid-cols-2">
+  <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+    <h2 class="mb-2 text-base font-bold sm:text-lg">أكثر المنتجات مبيعًا</h2>
+    {% if top_products %}
+      <ul class="space-y-2 text-sm">
+        {% for product_name, quantity in top_products %}
+          <li class="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+            <span>{{ product_name }}</span>
+            <span class="font-bold text-emerald-700">{{ quantity }} قطعة</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500">لا توجد بيانات بعد</p>
+    {% endif %}
+  </div>
+  <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <h2 class="mb-3 text-lg font-bold">أكثر الأرقام التي عملت طلبات</h2>
+    {% if top_customers %}
+      <ul class="space-y-2 text-sm">
+        {% for phone, count in top_customers %}
+          <li class="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+            <span>{{ phone }}</span>
+            <span class="font-bold text-slate-700">{{ count }} طلب</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500">لا توجد بيانات بعد</p>
+    {% endif %}
+  </div>
+</div>
+<h2 class="mb-3 mt-8 text-xl font-bold">آخر الطلبات</h2>
+{% include "admin/partials/orders_table.html" with context %}
+{% endblock %}

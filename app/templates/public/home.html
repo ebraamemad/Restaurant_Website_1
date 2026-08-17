@@ -1,0 +1,55 @@
+{% extends "public/base.html" %}
+
+{% block content %}
+
+<main
+    x-data="storeCart()"
+    x-init="load()"
+    x-cloak
+    class="min-h-screen bg-transparent pb-24 sm:pb-8">
+
+    <!-- Hero -->
+    {% include "public/components/hero.html" %}
+
+    <!-- Main Content -->
+    <section class="section px-3 py-4 pb-24 sm:px-4 sm:py-6 sm:pb-28 lg:py-8 lg:pb-10">
+
+        <div class="grid gap-4 lg:gap-6 lg:grid-cols-[1fr_340px]">
+
+            <!-- المنتجات -->
+            <div class="space-y-4 sm:space-y-5 lg:space-y-6">
+
+                <!-- الأقسام -->
+                {% include "public/components/categories.html" %}
+
+                <!-- البحث -->
+                {% include "public/components/search_bar.html" %}
+
+                <!-- المنتجات -->
+                <div id="products">
+
+                    {% include "public/partials/product_grid.html" %}
+
+                </div>
+
+            </div>
+
+            <!-- السلة فى الديسكتوب -->
+            {% include "public/components/cart_sidebar.html" %}
+
+        </div>
+
+    </section>
+
+    <!-- السلة فى الموبايل -->
+    {% include "public/components/cart_mobile.html" %}
+
+    <!-- Bottom Bar للموبايل -->
+    {% include "public/components/bottom_bar.html" %}
+
+</main>
+
+<!-- JavaScript -->
+<script src="/static/js/cart.js"></script>
+
+{% endblock %}

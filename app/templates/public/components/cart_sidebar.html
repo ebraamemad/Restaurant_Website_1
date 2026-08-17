@@ -1,0 +1,109 @@
+<aside class="card sticky top-5 hidden h-fit lg:block">
+
+    <div class="border-b p-5">
+
+        <h2 class="text-xl font-bold">
+
+            🛒 سلة الطلب
+
+        </h2>
+
+    </div>
+
+    <div class="max-h-[420px] overflow-auto p-5">
+
+        <template x-if="items.length==0">
+
+            <div class="py-10 text-center text-slate-400">
+
+                السلة فارغة
+
+            </div>
+
+        </template>
+
+        <template x-for="item in items" :key="item.id">
+
+            <div class="mb-4 border-b pb-4">
+
+                <div class="flex justify-between">
+
+                    <div>
+
+                        <div class="font-bold"
+
+                             x-text="item.name">
+
+                        </div>
+
+                        <div class="text-primary"
+
+                             x-text="item.price">
+
+                        </div>
+
+                        <div class="mt-1 text-xs text-slate-500" x-show="item.qty">
+
+                            الكمية: <span x-text="item.qty"></span>
+
+                        </div>
+
+                    </div>
+
+                    <button
+
+                        @click="remove(item.id)"
+
+                        class="text-red-500">
+
+                        🗑
+
+                    </button>
+
+                </div>
+
+                <div class="mt-3 flex items-center gap-2">
+
+                    <button
+
+                        class="h-8 w-8 rounded bg-slate-200"
+
+                        @click="decreaseQty(item)">
+
+                        -
+
+                    </button>
+
+                    <input
+
+                        x-model.number="item.quantity"
+
+                        @input="persist()"
+
+                        type="number"
+
+                        step="0.25"
+
+                        class="w-16 text-center">
+
+                    <button
+
+                        class="h-8 w-8 rounded bg-slate-200"
+
+                        @click="increaseQty(item)">
+
+                        +
+
+                    </button>
+
+                </div>
+
+            </div>
+
+        </template>
+
+    </div>
+
+    {% include "public/components/checkout_form.html" %}
+
+</aside>

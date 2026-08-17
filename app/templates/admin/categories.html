@@ -1,0 +1,31 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<h1 class="mb-5 text-2xl font-bold">الأقسام</h1>
+<form method="post" enctype="multipart/form-data" class="mb-6 grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-2">
+  <input name="name" required class="rounded border px-3 py-2" placeholder="اسم القسم">
+  <input name="sort_order" type="number" value="0" class="rounded border px-3 py-2" placeholder="الترتيب">
+  <textarea name="description" class="rounded border px-3 py-2 md:col-span-2" placeholder="الوصف"></textarea>
+  <input name="image" type="file" accept="image/*" class="rounded border px-3 py-2 md:col-span-2">
+  <label><input name="is_active" type="checkbox" value="true" checked> نشط</label>
+  <label><input name="is_featured" type="checkbox" value="true"> مميز</label>
+  <button class="rounded bg-slate-900 px-4 py-2 font-bold text-white md:col-span-2">إضافة قسم</button>
+</form>
+<div class="grid gap-4 md:grid-cols-2">
+  {% for category in categories %}
+    <form method="post" enctype="multipart/form-data" class="rounded bg-white p-4 shadow-sm">
+      <input type="hidden" name="id" value="{{ category.id }}">
+      <input name="name" value="{{ category.name }}" class="mb-2 w-full rounded border px-3 py-2">
+      <input name="sort_order" type="number" value="{{ category.sort_order }}" class="mb-2 w-full rounded border px-3 py-2">
+      <textarea name="description" class="mb-2 w-full rounded border px-3 py-2">{{ category.description or "" }}</textarea>
+      <input name="image" type="file" accept="image/*" class="mb-2 w-full rounded border px-3 py-2">
+      <div class="mb-3 flex gap-4">
+        <label><input name="is_active" type="checkbox" value="true" {% if category.is_active %}checked{% endif %}> نشط</label>
+        <label><input name="is_featured" type="checkbox" value="true" {% if category.is_featured %}checked{% endif %}> مميز</label>
+      </div>
+      <button class="rounded bg-emerald-700 px-4 py-2 text-white">حفظ</button>
+      <button form="delete-category-{{ category.id }}" class="rounded bg-red-600 px-4 py-2 text-white">حذف</button>
+    </form>
+    <form id="delete-category-{{ category.id }}" method="post" action="/admin/categories/{{ category.id }}/delete"></form>
+  {% endfor %}
+</div>
+{% endblock %}

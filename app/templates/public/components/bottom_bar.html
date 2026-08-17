@@ -1,0 +1,31 @@
+<div
+
+class="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 p-3 shadow-[0_-10px_40px_rgba(0,0,0,0.12)] backdrop-blur lg:hidden">
+
+    <button
+
+        @click="cartOpen=true"
+
+        class="flex min-h-[52px] w-full items-center justify-between rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-white shadow-lg transition active:scale-[0.98]">
+
+        <div>
+
+            🛒
+
+            <span x-text="items.length"></span>
+
+            منتجات
+
+        </div>
+
+        <div>
+
+            <span x-text="total().toFixed(2)"></span>
+
+            {{ settings.currency }}
+
+        </div>
+
+    </button>
+
+</div>

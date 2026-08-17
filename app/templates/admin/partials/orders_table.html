@@ -1,0 +1,37 @@
+<div class="overflow-x-auto rounded bg-white shadow-sm">
+  <table class="w-full min-w-[760px] text-sm">
+    <thead class="bg-slate-100 text-right">
+      <tr>
+        <th class="p-3">#</th><th class="p-3">العميل</th><th class="p-3">الهاتف</th><th class="p-3">الإجمالي</th><th class="p-3">الحالة</th><th class="p-3">التاريخ</th><th class="p-3">المنتجات</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for order in orders or latest_orders %}
+        <tr class="border-t align-top">
+          <td class="p-3">{{ order.id }}</td>
+          <td class="p-3">{{ order.customer_name }}<br><span class="text-slate-500">{{ order.customer_address }}</span></td>
+          <td class="p-3">{{ order.customer_phone }}</td>
+          <td class="p-3 font-bold">{{ order.total }}</td>
+          <td class="p-3">
+            <form method="post" action="/admin/orders/{{ order.id }}/status">
+              <select name="status_value" class="rounded border px-2 py-1" onchange="this.form.submit()">
+                {% for status in statuses | default([]) %}
+                  <option value="{{ status.value }}" {% if order.status == status.value %}selected{% endif %}>{{ status_labels[status.value] }}</option>
+                {% endfor %}
+              </select>
+              {% if not statuses %}{{ status_labels[order.status] if status_labels else order.status }}{% endif %}
+            </form>
+          </td>
+          <td class="p-3">{{ order.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+          <td class="p-3">
+            {% for item in order.items %}
+              <div>{{ item.product_name }} x {{ item.quantity }}</div>
+            {% endfor %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td class="p-4 text-center text-slate-500" colspan="7">لا توجد طلبات</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta
+name="viewport"
+content="width=device-width, initial-scale=1.0">
+
+<meta name="theme-color" content="#059669">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/static/manifest.json">
+<link rel="icon" href="/static/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+
+<title>
+
+{{ settings.store_name if settings else "Fresh Store" }}
+
+</title>
+
+<link rel="preconnect"
+href="https://fonts.googleapis.com">
+
+<link rel="preconnect"
+href="https://fonts.gstatic.com"
+crossorigin>
+
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap"
+rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+
+<script>
+
+tailwind.config={
+
+theme:{
+
+extend:{
+
+fontFamily:{
+
+cairo:["Cairo","sans-serif"]
+
+},
+
+colors:{
+
+primary:"#059669",
+
+secondary:"#047857",
+
+light:"#f8fafc"
+
+},
+
+boxShadow:{
+
+card:"0 10px 30px rgba(0,0,0,.08)"
+
+}
+
+}
+
+}
+
+}
+
+</script>
+
+<script defer
+src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+
+<link rel="stylesheet"
+href="/static/css/app.css">
+
+</head>
+
+<body class="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(5,150,105,0.12),_transparent_45%),linear-gradient(135deg,_#f8fafc_0%,_#f1f5f9_100%)] font-cairo text-slate-800 antialiased selection:bg-primary selection:text-white">
+
+{% block content %}
+
+{% endblock %}
+
+<div id="offline-status" class="fixed inset-0 z-[100] hidden items-center justify-center bg-slate-950/85 p-4 text-center text-white">
+  <div class="rounded-3xl border border-white/15 bg-white/10 px-5 py-6 shadow-2xl backdrop-blur">
+    <div class="mb-3 text-4xl">📡</div>
+    <h2 class="text-lg font-bold">لا يوجد اتصال بالإنترنت</h2>
+    <p class="mt-2 text-sm text-slate-200">ستظهر الصفحة عند عودة الاتصال.</p>
+  </div>
+</div>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/static/js/sw.js').catch(() => {});
+  });
+}
+
+const offlineStatus = document.getElementById('offline-status');
+const updateOfflineState = () => {
+  if (!offlineStatus) return;
+  const isOffline = !navigator.onLine;
+  offlineStatus.classList.toggle('hidden', !isOffline);
+  offlineStatus.classList.toggle('flex', isOffline);
+};
+
+window.addEventListener('online', updateOfflineState);
+window.addEventListener('offline', updateOfflineState);
+updateOfflineState();
+</script>
+
+</body>
+
+</html>

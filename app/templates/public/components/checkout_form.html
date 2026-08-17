@@ -1,0 +1,80 @@
+<div class="border-t p-5">
+
+    <div class="mb-4">
+
+        <p class="text-lg font-bold">
+
+            الإجمالى
+
+        </p>
+
+        <p class="mt-2 text-3xl font-extrabold text-primary">
+
+            <span x-text="total().toFixed(2)"></span>
+
+            {{ settings.currency }}
+
+        </p>
+
+    </div>
+
+    <form
+        class="space-y-3"
+        @submit.prevent="submitOrder()">
+
+        <input
+            x-model="customer.name"
+            required
+            placeholder="الاسم"
+
+            class="w-full rounded-xl border p-3">
+
+        <input
+            x-model="customer.phone"
+            required
+            placeholder="رقم الهاتف"
+
+            class="w-full rounded-xl border p-3">
+
+        <input
+            x-model="customer.address"
+            required
+            placeholder="العنوان"
+
+            class="w-full rounded-xl border p-3">
+
+        <textarea
+
+            x-model="customer.notes"
+
+            rows="3"
+
+            placeholder="ملاحظات"
+
+            class="w-full rounded-xl border p-3">
+
+        </textarea>
+
+        <button
+
+            :disabled="items.length===0||loading"
+
+            class="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-4 font-bold text-white transition hover:bg-secondary disabled:opacity-50 active:scale-[0.98]">
+
+            <span x-show="loading" class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
+
+            <span x-text="loading ? 'جاري الإرسال...' : 'إرسال الطلب عبر واتساب'"></span>
+
+        </button>
+
+        <p
+
+            class="text-center text-red-500"
+
+            x-text="error">
+
+        </p>
+
+    </form>
+
+</div>
