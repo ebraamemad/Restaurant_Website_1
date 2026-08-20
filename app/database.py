@@ -57,6 +57,6 @@ def get_db() -> Generator[Session, None, None]:
     finally:
         db.close()
 
-from app import models
-# إنشاء الجداول إذا لم تكن موجودة
-Base.metadata.create_all(bind=engine)
+# Import models for SQLAlchemy to register them with Base metadata.
+# Note: Schema creation is handled by Alembic migrations, not create_all().
+from app import models  # noqa: F401
