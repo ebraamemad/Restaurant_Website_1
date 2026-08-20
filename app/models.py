@@ -10,7 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 
-class Admin(Base):# من نوع الـ ORM Class، وده معناه كل اللي جوه ده هيتحول لجدول في قاعدة البيانات.
+class Admin(Base):
     __tablename__ = "admins"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -33,11 +33,10 @@ class Category(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_featured: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())#وقت قاعدة البيانات الحالى.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     products: Mapped[List["Product"]] = relationship(back_populates="category")
-    # نفس استخدام الـ forward reference اللي فوق، عشان يقدر يعرف الـ Product بعدين.
 
 
 class Product(Base):
@@ -59,7 +58,22 @@ class Product(Base):
 
     category: Mapped[Category] = relationship(back_populates="products")
     order_items: Mapped[List["OrderItem"]] = relationship(back_populates="product")
-    # order item هنا مش متعرفة حاليا وده سبب وجود from __future__ import annotations فاكود ده بيعمل forward reference عشان يقدر يعرفها بعدين.   
+    addons: Mapped[List["Addon"]] = relationship(back_populates="product", cascade="all, delete-orphan")
+
+
+class Addon(Base):
+    __tablename__ = "addons"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    product: Mapped[Product] = relationship(back_populates="addons")
 
 
 class Order(Base):
@@ -77,7 +91,6 @@ class Order(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     items: Mapped[List["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
-    # order item هنا مش متعرفة حاليا وده سبب وجود from __future__ import annotations فاكود ده بيعمل forward reference عشان يقدر يعرفها بعدين.   
 
 
 class OrderItem(Base):
@@ -94,6 +107,18 @@ class OrderItem(Base):
 
     order: Mapped[Order] = relationship(back_populates="items")
     product: Mapped[Product] = relationship(back_populates="order_items")
+    addons: Mapped[List["OrderItemAddon"]] = relationship(back_populates="order_item", cascade="all, delete-orphan")
+
+
+class OrderItemAddon(Base):
+    __tablename__ = "order_item_addons"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_item_id: Mapped[int] = mapped_column(ForeignKey("order_items.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+
+    order_item: Mapped[OrderItem] = relationship(back_populates="addons")
 
 
 class StoreSettings(Base):

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.deps import get_current_admin
-from app.models import Admin, Category, Order, OrderItem, Product, StoreSettings
+from app.models import Admin, Addon, Category, Order, OrderItem, Product, StoreSettings
 from app.schemas import OrderStatus
 from app.utils import make_slug, save_image
 
@@ -59,7 +59,7 @@ def get_or_create_settings(db: Session) -> StoreSettings:
 
 
 def get_dashboard_stats(db: Session):
-    orders = db.scalars(select(Order).options(selectinload(Order.items)).order_by(Order.created_at.desc())).all()
+    orders = db.scalars(select(Order).options(selectinload(Order.items).selectinload(OrderItem.addons)).order_by(Order.created_at.desc())).all()
 
     product_totals = {}
     phone_counts = {}
@@ -202,6 +202,55 @@ def delete_product(product_id: int, db: Session = Depends(get_db)) -> RedirectRe
         db.add(product)
         db.commit()
     return redirect("/admin/products")
+
+
+@router.get("/products/{product_id}/addons", response_class=HTMLResponse)
+def manage_addons(product_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Product not found")
+    addons = db.scalars(
+        select(Addon).where(Addon.product_id == product_id).order_by(Addon.sort_order, Addon.name)
+    ).all()
+    return templates.TemplateResponse(
+        "admin/addons.html",
+        {"request": request, "product": product, "addons": addons},
+    )
+
+
+@router.post("/products/{product_id}/addons")
+async def save_addon(
+    product_id: int,
+    id: Optional[int] = Form(default=None),
+    name: str = Form(...),
+    price: Decimal = Form(...),
+    is_active: bool = Form(default=True),
+    sort_order: int = Form(default=0),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Product not found")
+    addon = db.get(Addon, id) if id else Addon(product_id=product_id)
+    if id and (addon is None or addon.product_id != product_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Addon not found")
+    addon.name = name
+    addon.price = price
+    addon.is_active = is_active
+    addon.sort_order = sort_order
+    db.add(addon)
+    db.commit()
+    return redirect(f"/admin/products/{product_id}/addons")
+
+
+@router.post("/products/{product_id}/addons/{addon_id}/delete")
+def delete_addon(product_id: int, addon_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    addon = db.get(Addon, addon_id)
+    if addon is None or addon.product_id != product_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Addon not found")
+    db.delete(addon)
+    db.commit()
+    return redirect(f"/admin/products/{product_id}/addons")
 
 
 @router.get("/orders", response_class=HTMLResponse)

@@ -32,6 +32,7 @@
       <label><input name="is_available" type="checkbox" value="true" {% if product.is_available %}checked{% endif %}> متوفر</label>
       <label><input name="is_active" type="checkbox" value="true" {% if product.is_active %}checked{% endif %}> ظاهر</label>
       <button class="rounded bg-emerald-700 px-4 py-2 text-white">حفظ</button>
+      <a href="/admin/products/{{ product.id }}/addons" class="rounded bg-slate-600 px-4 py-2 text-white">الإضافات</a>
       <button form="delete-product-{{ product.id }}" class="rounded bg-red-600 px-4 py-2 text-white">حذف</button>
     </form>
     <form id="delete-product-{{ product.id }}" method="post" action="/admin/products/{{ product.id }}/delete"></form>

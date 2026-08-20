@@ -42,9 +42,17 @@ class SettingsForm(BaseModel):
     currency: str = Field(default="EGP", min_length=1, max_length=10)
 
 
+class AddonForm(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    price: Decimal = Field(ge=0, decimal_places=2)
+    is_active: bool = True
+    sort_order: int = Field(default=0, ge=0)
+
+
 class CartItemIn(BaseModel):
     product_id: int = Field(gt=0)
     quantity: Decimal = Field(gt=0, le=999)
+    addon_ids: List[int] = Field(default=[])
 
 
 class OrderCreate(BaseModel):
@@ -54,19 +62,42 @@ class OrderCreate(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=1000)
     items: List[CartItemIn] = Field(min_length=1)
 
-    @field_validator("items")
-    @classmethod
-    def ensure_unique_products(cls, items: List[CartItemIn]) -> List[CartItemIn]:
-        product_ids = [item.product_id for item in items]
-        if len(product_ids) != len(set(product_ids)):
-            raise ValueError("Duplicate products are not allowed")
-        return items
-
 
 class OrderCreated(BaseModel):
     order_id: int
     total: Decimal
     whatsapp_url: str
+
+
+class AddonOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    price: Decimal
+    is_active: bool
+    sort_order: int
+
+
+class ProductDetailOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    price: Decimal
+    unit: str
+    description: Optional[str]
+    image_url: Optional[str]
+    is_available: bool
+    is_active: bool
+    addons: List[AddonOut] = []
+
+
+class OrderItemAddonOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    price: Decimal
 
 
 class ProductOut(BaseModel):

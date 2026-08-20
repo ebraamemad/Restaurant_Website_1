@@ -1,0 +1,124 @@
+{% extends "public/base.html" %}
+{% block content %}
+
+<main x-data="productDetail({{ product|tojson|safe }}, {{ addons|tojson|safe }})" x-cloak class="min-h-screen bg-transparent pb-24 sm:pb-8">
+  <section class="section mx-auto max-w-3xl px-3 py-6 sm:px-4 sm:py-8">
+
+    <a href="/" class="mb-4 inline-flex items-center text-sm text-slate-500 hover:text-primary">
+      ← العودة للقائمة
+    </a>
+
+    <div class="grid gap-6 rounded-2xl bg-white p-4 shadow-sm sm:p-6 lg:grid-cols-[200px_1fr]">
+
+      {% if product.image_url %}
+        <img src="{{ product.image_url }}" alt="{{ product.name }}" class="rounded-lg object-cover" width="200" height="200">
+      {% else %}
+        <div class="flex h-48 w-full items-center justify-center rounded-lg bg-slate-200 text-5xl font-semibold text-slate-500">🍽</div>
+      {% endif %}
+
+      <div>
+        <h1 class="text-2xl font-bold sm:text-3xl">{{ product.name }}</h1>
+        {% if product.description %}
+          <p class="mt-2 text-sm text-slate-600">{{ product.description }}</p>
+        {% endif %}
+        <div class="mt-4">
+          <p class="text-2xl font-extrabold text-primary">{{ product.price }} {{ settings.currency }}</p>
+          {% if product.unit %}<span class="text-xs text-slate-500"> / {{ product.unit }}</span>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Addons -->
+    <div class="mt-6 rounded-2xl bg-white p-4 shadow-sm sm:p-6" x-show="addons.length > 0">
+      <h2 class="mb-3 text-lg font-bold">إضافات (اختياري)</h2>
+      <div class="space-y-2">
+        <template x-for="addon in addons" :key="addon.id">
+          <label class="flex items-center justify-between rounded-lg border border-slate-200 p-3">
+            <div class="flex items-center gap-2">
+              <input
+                type="checkbox"
+                :value="addon.id"
+                x-model.number="selectedAddons"
+                @change="$dispatch('addon-toggled')"
+              >
+              <span x-text="addon.name"></span>
+            </div>
+            <span class="text-sm font-semibold text-primary" x-text="formatPrice(addon.price)"></span>
+          </label>
+        </template>
+      </div>
+    </div>
+
+    <!-- Quantity + Total -->
+    <div class="mt-6 flex items-center justify-between rounded-2xl bg-white p-4 shadow-sm">
+      <div class="flex items-center gap-3">
+        <button type="button" class="h-8 w-8 rounded-full bg-slate-200 text-lg font-bold" @click="quantity = Math.max(1, quantity - 1)">−</button>
+        <span class="min-w-8 text-center font-bold" x-text="quantity"></span>
+        <button type="button" class="h-8 w-8 rounded-full bg-slate-200 text-lg font-bold" @click="quantity = Math.min(999, quantity + 1)">+</button>
+      </div>
+      <div class="text-xl font-extrabold text-primary" x-text="formatPrice(totalPrice())"></div>
+    </div>
+
+    <!-- Add to Cart -->
+    <button
+      @click="addToCart()"
+      class="mt-4 w-full rounded-2xl bg-primary py-3 font-bold text-white shadow-sm transition duration-200 hover:bg-secondary active:scale-[0.98]"
+    >
+      ➕ إضافة للسلة
+    </button>
+
+  </section>
+</main>
+
+<script>
+function productDetail(product, addons) {
+  return {
+    product: product,
+    addons: addons,
+    selectedAddons: [],
+    quantity: 1,
+
+    init() {
+      this.selectedAddons = this.addons
+        .filter(a => a.is_active)
+        .map(a => a.id);
+    },
+
+    formatPrice(value) {
+      const v = Number(value || 0);
+      return v.toFixed(2);
+    },
+
+    addonPriceTotal() {
+      const sel = this.addons.filter(a => this.selectedAddons.includes(a.id));
+      return sel.reduce((sum, a) => sum + Number(a.price || 0), 0);
+    },
+
+    selectedAddonObjects() {
+      return this.addons.filter(a => this.selectedAddons.includes(a.id) && a.is_active);
+    },
+
+    totalPrice() {
+      const base = Number(this.product.price || 0);
+      return (base + this.addonPriceTotal()) * this.quantity;
+    },
+
+    addToCart() {
+      const cart = JSON.parse(localStorage.getItem('cart') || '[]');
+      const addonObjs = this.selectedAddonObjects();
+      cart.push({
+        id: this.product.id,
+        name: this.product.name,
+        price: Number(this.product.price),
+        quantity: this.quantity,
+        addons: addonObjs.map(a => ({id: a.id, name: a.name, price: Number(a.price)})),
+        addonIds: addonObjs.map(a => a.id),
+      });
+      localStorage.setItem('cart', JSON.stringify(cart));
+      window.location.href = '/';
+    }
+  }
+}
+</script>
+
+{% endblock %}
