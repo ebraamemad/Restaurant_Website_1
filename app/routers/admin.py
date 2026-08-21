@@ -224,7 +224,7 @@ async def save_addon(
     id: Optional[int] = Form(default=None),
     name: str = Form(...),
     price: Decimal = Form(...),
-    is_active: bool = Form(default=True),
+    is_active: bool = Form(default=False),
     sort_order: int = Form(default=0),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
@@ -236,6 +236,7 @@ async def save_addon(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Addon not found")
     addon.name = name
     addon.price = price
+    # الفورم مبتبعتش الحقل لما الصينبوكس يكون فاضي، فالافتراضي لازم False وإلا تعطيل الإضافة مستحيل.
     addon.is_active = is_active
     addon.sort_order = sort_order
     db.add(addon)

@@ -12,7 +12,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
-from app.models import Addon, Category, Order, OrderItem, Product, StoreSettings
+from app.models import Addon, Category, Order, OrderItem, OrderItemAddon, Product, StoreSettings
 from app.schemas import AddonOut, OrderCreate, OrderCreated, ProductDetailOut
 from app.utils import build_whatsapp_message, build_whatsapp_url
 
@@ -76,6 +76,7 @@ def home(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
 
 @router.get("/search", response_class=HTMLResponse)
 def search_products(request: Request, q: str = "", db: Session = Depends(get_db)) -> HTMLResponse:
+    store_settings = get_settings(db)
     statement = select(Product).where(Product.is_active.is_(True))
     query = (q or "").strip()
 
@@ -90,7 +91,10 @@ def search_products(request: Request, q: str = "", db: Session = Depends(get_db)
         statement = statement.order_by(Product.sort_order, Product.name)
 
     products = db.scalars(statement.order_by(Product.sort_order, Product.name)).all()
-    return templates.TemplateResponse("public/partials/product_grid.html", {"request": request, "products": products})
+    return templates.TemplateResponse(
+        "public/partials/product_grid.html",
+        {"request": request, "settings": store_settings, "products": products},
+    )
 
 
 @router.get("/products/{product_slug}", response_class=HTMLResponse)

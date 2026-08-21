@@ -1,158 +1,218 @@
-function storeCart() {
+// ===== السلة في localStorage — مصدر واحد للحقيقة =====
+const CART_KEY = "cart";
 
-    return {
-
-        cartOpen: false,
-
-        loading: false,
-
-        error: "",
-
-        items: [],
-
-        qtyMap: {},
-
-        customer: {
-            name: "",
-            phone: "",
-            address: "",
-            notes: ""
-        },
-
-        load() {
-            this.items = JSON.parse(
-                localStorage.getItem("cart") || "[]"
-            )
-            // Ensure every item has an addons array and addonIds array
-            this.items.forEach(item => {
-                if (!item.addons) item.addons = []
-                if (!item.addonIds) item.addonIds = []
-            })
-        },
-
-        persist() {
-            this.items = this.items.filter(
-                item => item.quantity > 0
-            )
-            localStorage.setItem("cart", JSON.stringify(this.items))
-        },
-
-        formatPrice(value) {
-            const v = Number(value || 0)
-            return v.toFixed(2)
-        },
-
-        formatQty(value) {
-            const amount = Number(value || 1)
-            if (!Number.isFinite(amount)) return "1"
-            if (Number.isInteger(amount)) return String(amount)
-            return String(Number(amount.toFixed(2)).replace(/\.0$/, ""))
-        },
-
-        setProductQty(productId, value) {
-            const next = Number(value || 0.25)
-            this.qtyMap[productId] = Math.max(0.25, Math.min(999, next))
-        },
-
-        increaseProductQty(productId) {
-            const current = Number(this.qtyMap[productId] || 1)
-            this.qtyMap[productId] = Math.min(999, current + 0.25)
-        },
-
-        decreaseProductQty(productId) {
-            const current = Number(this.qtyMap[productId] || 1)
-            const next = current - 0.25
-            this.qtyMap[productId] = next < 0.25 ? 0.25 : next
-        },
-
-        increaseQty(item) {
-            const current = Number(item.quantity || 1)
-            item.quantity = Math.min(999, current + 0.25)
-            this.persist()
-        },
-
-        decreaseQty(item) {
-            const current = Number(item.quantity || 1)
-            const next = current - 0.25
-            item.quantity = next < 0.25 ? 0.25 : next
-            this.persist()
-        },
-
-        addItemTotal(item) {
-            const base = Number(item.price || 0)
-            const addonTotal = (item.addons || []).reduce(
-                (sum, a) => sum + Number(a.price || 0), 0
-            )
-            return (base + addonTotal) * item.quantity
-        },
-
-        add(product) {
-            const quantity = Number(product.qty || 1)
-            const addonKey = JSON.stringify(product.addonIds || [])
-            const current = this.items.find(
-                item => item.id === product.id &&
-                    (item.addonKey || "[]") === addonKey
-            )
-            if (current) {
-                current.quantity += quantity
-            } else {
-                this.items.push({
-                    ...product,
-                    quantity,
-                    addonKey: addonKey,
-                    addons: product.addons || [],
-                    addonIds: product.addonIds || [],
-                })
-            }
-            this.persist()
-        },
-
-        remove(id) {
-            this.items = this.items.filter(
-                item => item.id !== id
-            )
-            this.persist()
-        },
-
-        total() {
-            return this.items.reduce(
-                (sum, item) => sum + this.addItemTotal(item),
-                0
-            )
-        },
-
-        async submitOrder() {
-            this.loading = true
-            this.error = ""
-
-            const response = await fetch("/orders", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    customer_name: this.customer.name,
-                    customer_phone: this.customer.phone,
-                    customer_address: this.customer.address,
-                    notes: this.customer.notes || null,
-                    items: this.items.map(item => ({
-                        product_id: item.id,
-                        quantity: item.quantity,
-                        addon_ids: (item.addonIds || []).map(Number)
-                    }))
-                })
-            })
-
-            this.loading = false
-
-            if (!response.ok) {
-                this.error = "راجع بيانات الطلب."
-                return
-            }
-
-            const data = await response.json()
-            localStorage.removeItem("cart")
-            window.location.href = data.whatsapp_url
-        }
+const Cart = {
+  read() {
+    try {
+      return JSON.parse(localStorage.getItem(CART_KEY) || "[]");
+    } catch {
+      return [];
     }
+  },
+  write(items) {
+    localStorage.setItem(CART_KEY, JSON.stringify(items));
+  },
+  // نفس المنتج + نفس الإضافات = نفس السطر. نفس المنتج بإضافات مختلفة = سطور منفصلة.
+  lineId(productId, addonIds = []) {
+    return [productId, ...[...addonIds].sort((a, b) => a - b)].join("-");
+  },
+  add(item) {
+    const items = this.read();
+    const id = this.lineId(item.id, item.addonIds || []);
+    const found = items.find((i) => i.lineId === id);
+    if (found) {
+      found.quantity = Math.min(999, found.quantity + item.quantity);
+    } else {
+      items.push({ lineId: id, ...item });
+    }
+    this.write(items);
+    return items;
+  },
+  clear() {
+    localStorage.removeItem(CART_KEY);
+  },
+};
+
+// ===== سلة الصفحة الرئيسية (Alpine) =====
+function storeCart() {
+  return {
+    cartOpen: false,
+    loading: false,
+    error: "",
+    items: [],
+    qtyMap: {}, // كمية مؤقتة لكل كارت منتج على الصفحة الرئيسية
+    customer: { name: "", phone: "", address: "", notes: "" },
+
+    load() {
+      this.items = Cart.read();
+    },
+    persist() {
+      Cart.write(this.items);
+    },
+
+    formatPrice(value) {
+      return Number(value || 0).toFixed(2);
+    },
+
+    // سعر الوحدة = سعر المنتج + الإضافات
+    unitPrice(item) {
+      const base = Number(item.price || 0);
+      const addons = (item.addons || []).reduce(
+        (sum, a) => sum + Number(a.price || 0),
+        0
+      );
+      return base + addons;
+    },
+    // إجمالي السطر = سعر الوحدة × الكمية
+    lineTotal(item) {
+      return this.unitPrice(item) * Number(item.quantity || 0);
+    },
+    count() {
+      return this.items.length;
+    },
+    total() {
+      return this.items.reduce((sum, i) => sum + this.lineTotal(i), 0);
+    },
+
+    // كمية كارت المنتج (أرقام صحيحة)
+    setProductQty(productId, value) {
+      let n = Math.floor(Number(value) || 1);
+      this.qtyMap[productId] = Math.min(999, Math.max(1, n));
+    },
+    increaseProductQty(productId) {
+      const cur = Number(this.qtyMap[productId] || 1);
+      this.qtyMap[productId] = Math.min(999, cur + 1);
+    },
+    decreaseProductQty(productId) {
+      const cur = Number(this.qtyMap[productId] || 1);
+      this.qtyMap[productId] = Math.max(1, cur - 1);
+    },
+
+    add(product) {
+      const qty = Math.floor(Number(product.quantity || 1)) || 1;
+      const addonIds = (product.addonIds || []).map(Number);
+      const id = Cart.lineId(product.id, addonIds);
+      const found = this.items.find((i) => i.lineId === id);
+      if (found) {
+        found.quantity = Math.min(999, found.quantity + qty);
+      } else {
+        this.items.push({
+          lineId: id,
+          id: product.id,
+          name: product.name,
+          price: Number(product.price || 0),
+          quantity: qty,
+          addons: product.addons || [],
+          addonIds: addonIds,
+        });
+      }
+      this.persist();
+    },
+
+    // كمية سطر السلة (أرقام صحيحة)
+    increaseQty(item) {
+      item.quantity = Math.min(999, Number(item.quantity || 1) + 1);
+      this.persist();
+    },
+    decreaseQty(item) {
+      item.quantity = Math.max(1, Number(item.quantity || 1) - 1);
+      this.persist();
+    },
+    setQty(item, value) {
+      let n = Math.floor(Number(value) || 1);
+      if (n < 1) n = 1;
+      if (n > 999) n = 999;
+      item.quantity = n;
+      this.persist();
+    },
+    remove(lineId) {
+      this.items = this.items.filter((i) => i.lineId !== lineId);
+      this.persist();
+    },
+
+    async submitOrder() {
+      if (!this.items.length) return;
+      this.loading = true;
+      this.error = "";
+      try {
+        const resp = await fetch("/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            customer_name: this.customer.name,
+            customer_phone: this.customer.phone,
+            customer_address: this.customer.address,
+            notes: this.customer.notes || null,
+            items: this.items.map((i) => ({
+              product_id: i.id,
+              quantity: i.quantity,
+              addon_ids: (i.addonIds || []).map(Number),
+            })),
+          }),
+        });
+        if (!resp.ok) {
+          this.error = "راجع بيانات الطلب.";
+          return;
+        }
+        const data = await resp.json();
+        Cart.clear();
+        this.items = [];
+        window.location.href = data.whatsapp_url;
+      } catch {
+        this.error = "تعذّر إرسال الطلب.";
+      } finally {
+        this.loading = false;
+      }
+    },
+  };
+}
+
+// ===== صفحة تفاصيل المنتج (Alpine) =====
+function productDetail(product, addons) {
+  return {
+    product,
+    addons,
+    selectedAddons: [],
+    quantity: 1,
+
+    formatPrice(value) {
+      return Number(value || 0).toFixed(2);
+    },
+    chosenAddons() {
+      return this.addons.filter(
+        (a) => a.is_active && this.selectedAddons.includes(a.id)
+      );
+    },
+    addonTotal() {
+      return this.chosenAddons().reduce(
+        (sum, a) => sum + Number(a.price || 0),
+        0
+      );
+    },
+    totalPrice() {
+      return (Number(this.product.price || 0) + this.addonTotal()) * this.quantity;
+    },
+    inc() {
+      this.quantity = Math.min(999, this.quantity + 1);
+    },
+    dec() {
+      this.quantity = Math.max(1, this.quantity - 1);
+    },
+    addToCart() {
+      const chosen = this.chosenAddons().map((a) => ({
+        id: a.id,
+        name: a.name,
+        price: Number(a.price),
+      }));
+      Cart.add({
+        id: this.product.id,
+        name: this.product.name,
+        price: Number(this.product.price),
+        quantity: this.quantity,
+        addons: chosen,
+        addonIds: chosen.map((a) => a.id),
+      });
+      window.location.href = "/";
+    },
+  };
 }

@@ -19,8 +19,9 @@ env/
 .env.*
 !.env.example
 
-# Uploads
-uploads/
+# Uploads (keep the folder in git via .gitkeep, ignore uploaded content)
+app/uploads/*
+!app/uploads/.gitkeep
 
 # IDE
 .vscode/

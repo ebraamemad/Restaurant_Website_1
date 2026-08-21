@@ -51,7 +51,7 @@ class AddonForm(BaseModel):
 
 class CartItemIn(BaseModel):
     product_id: int = Field(gt=0)
-    quantity: Decimal = Field(gt=0, le=999)
+    quantity: int = Field(ge=1, le=999)
     addon_ids: List[int] = Field(default=[])
 
 
