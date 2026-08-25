@@ -47,8 +47,8 @@ class Product(Base):
     name: Mapped[str] = mapped_column(String(160))
     slug: Mapped[str] = mapped_column(String(200), unique=True, index=True)
     description: Mapped[Optional[str]] = mapped_column(Text)
-    price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
-    unit: Mapped[str] = mapped_column(String(40), default="kg")
+    base_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)  # السعر الأساسي قبل الخيارات
+    unit: Mapped[str] = mapped_column(String(40), default="piece")
     image_url: Mapped[Optional[str]] = mapped_column(String(500))
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -58,6 +58,7 @@ class Product(Base):
 
     category: Mapped[Category] = relationship(back_populates="products")
     order_items: Mapped[List["OrderItem"]] = relationship(back_populates="product")
+    options: Mapped[List["ProductOption"]] = relationship(back_populates="product")
     addons: Mapped[List["Addon"]] = relationship(back_populates="product", cascade="all, delete-orphan")
 
 
@@ -74,6 +75,7 @@ class Addon(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     product: Mapped[Product] = relationship(back_populates="addons")
+    order_item_addons: Mapped[List["OrderItemAddon"]] = relationship(back_populates="addon")
 
 
 class Order(Base):
@@ -87,10 +89,15 @@ class Order(Base):
     status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
     total: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     whatsapp_message: Mapped[str] = mapped_column(Text)
+    delivery_option_id: Mapped[Optional[int]] = mapped_column(ForeignKey("delivery_options.id"))
+    coupon_code: Mapped[Optional[str]] = mapped_column(String(50), ForeignKey("coupons.code"))
+    pickup_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     items: Mapped[List["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
+    delivery_option: Mapped["DeliveryOption"] = relationship(back_populates="orders")
+    coupon: Mapped["Coupon"] = relationship(back_populates="orders")
 
 
 class OrderItem(Base):
@@ -115,10 +122,78 @@ class OrderItemAddon(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     order_item_id: Mapped[int] = mapped_column(ForeignKey("order_items.id", ondelete="CASCADE"), index=True)
+    addon_id: Mapped[int] = mapped_column(ForeignKey("addons.id"), index=True)
     name: Mapped[str] = mapped_column(String(120))
     price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
 
     order_item: Mapped[OrderItem] = relationship(back_populates="addons")
+    addon: Mapped["Addon"] = relationship(back_populates="order_item_addons")
+
+
+class RestaurantSettings(Base):
+    __tablename__ = "restaurant_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    restaurant_name: Mapped[str] = mapped_column(String(160), default="Restaurant")
+    whatsapp_number: Mapped[str] = mapped_column(String(30), default="201000000000")
+    phone_number: Mapped[Optional[str]] = mapped_column(String(30))
+    address: Mapped[Optional[str]] = mapped_column(String(300))
+    logo_url: Mapped[Optional[str]] = mapped_column(String(500))
+    banner_url: Mapped[Optional[str]] = mapped_column(String(500))
+    working_hours: Mapped[Optional[str]] = mapped_column(String(250))
+    currency: Mapped[str] = mapped_column(String(10), default="EGP")
+    facebook_url: Mapped[Optional[str]] = mapped_column(String(500))
+    tiktok_url: Mapped[Optional[str]] = mapped_column(String(500))
+    theme_colors: Mapped[Optional[str]] = mapped_column(String(500))  # JSON string for theme colors
+    additional_info: Mapped[Optional[str]] = mapped_column(Text)  # Additional info displayed at bottom
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ProductOption(Base):
+    __tablename__ = "product_options"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)  # مثال: "صغير", "وسط", "كبير"
+    price_adjustment: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))  # تعديل السعر
+    is_available: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    product: Mapped["Product"] = relationship(back_populates="options")
+
+
+class Coupon(Base):
+    __tablename__ = "coupons"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    discount_type: Mapped[str] = mapped_column(String(20), nullable=False)  # 'percentage' or 'fixed'
+    discount_value: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)  # نسبة مئوية أو مبلغ ثابت
+    minimum_order: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    usage_limit: Mapped[Optional[int]] = mapped_column(Integer)  # عدد الاستخدامات المسموح بها (NULL = غير محدود)
+    usage_count: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DeliveryOption(Base):
+    __tablename__ = "delivery_options"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)  # مثال: "التوصيل", "الاستلام"
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    estimated_time: Mapped[Optional[str]] = mapped_column(String(50))  # مثال: "30-45 دقيقة"
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class StoreSettings(Base):
