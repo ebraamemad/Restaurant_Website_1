@@ -15,7 +15,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routers import admin, admin_auth, public
+from app.routers import admin, admin_auth, api, public
 from app.security import CSRF_COOKIE_NAME, create_csrf_token, verify_csrf_token
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -65,5 +65,6 @@ async def admin_csrf_cookie(request: Request, call_next):
 
 #دي معناها: ضيف روابط العميل، وروابط تسجيل الدخول، وروابط الأدمن للتطبيق.
 app.include_router(public.router)
+app.include_router(api.router)
 app.include_router(admin_auth.router)
 app.include_router(admin.router)

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import re
-import unicodedata
 from decimal import Decimal
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
@@ -13,9 +11,19 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
-from app.models import Addon, Category, Order, OrderItem, OrderItemAddon, Product, RestaurantSettings
-from app.schemas import AddonOut, OrderCreate, OrderCreated, ProductDetailOut
-from app.utils import build_whatsapp_message, build_whatsapp_url
+from app.models import (
+    Category,
+    Order,
+    OrderItem,
+    OrderItemAddon,
+    OrderItemOption,
+    Product,
+    ProductOptionGroup,
+    RestaurantSettings,
+)
+from app.ordering import compute_pricing, validate_scheduled_time
+from app.schemas import AddonOut, OrderCreate, OrderCreated, OrderStatus, ProductDetailOut
+from app.utils import build_search_variants, build_whatsapp_message, build_whatsapp_url
 
 router = APIRouter()
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
@@ -32,30 +40,6 @@ def get_settings(db: Session) -> RestaurantSettings:
     return settings
 
 
-def normalize_search_text(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value)
-    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
-    normalized = normalized.lower().strip()
-    normalized = re.sub(r"[^a-z0-9\u0600-\u06ff]+", " ", normalized)
-    return " ".join(normalized.split())
-
-
-def build_search_variants(value: str) -> List[str]:
-    raw = (value or "").strip()
-    if not raw:
-        return []
-
-    variants = {raw, normalize_search_text(raw)}
-    cleaned = normalize_search_text(raw)
-    if cleaned:
-        variants.add(cleaned.replace(" ", ""))
-        variants.add(cleaned.replace("ة", "ه"))
-        variants.add(cleaned.replace("ي", "ى"))
-        variants.add(cleaned.replace("ى", "ي"))
-
-    return [variant for variant in variants if variant]
-
-
 @router.get("/", response_class=HTMLResponse)
 def home(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     restaurant_settings = get_settings(db)
@@ -68,6 +52,7 @@ def home(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     products = db.scalars(
         select(Product)
         .where(Product.is_active.is_(True))
+        .options(selectinload(Product.options), selectinload(Product.option_groups))
         .order_by(Product.sort_order, Product.name)
     ).all()
     return templates.TemplateResponse(
@@ -92,7 +77,11 @@ def search_products(request: Request, q: str = "", db: Session = Depends(get_db)
     else:
         statement = statement.order_by(Product.sort_order, Product.name)
 
-    products = db.scalars(statement.order_by(Product.sort_order, Product.name)).all()
+    products = db.scalars(
+        statement.options(selectinload(Product.options), selectinload(Product.option_groups)).order_by(
+            Product.sort_order, Product.name
+        )
+    ).all()
     return templates.TemplateResponse(
         "public/partials/product_grid.html",
         {"request": request, "settings": restaurant_settings, "products": products},
@@ -105,91 +94,108 @@ def product_detail(request: Request, product_slug: str, db: Session = Depends(ge
     product = db.scalar(
         select(Product)
         .where(Product.slug == product_slug, Product.is_active.is_(True), Product.is_available.is_(True))
-        .options(selectinload(Product.category), selectinload(Product.addons))
+        .options(
+            selectinload(Product.category),
+            selectinload(Product.addons),
+            selectinload(Product.options),
+            selectinload(Product.option_groups).selectinload(ProductOptionGroup.options),
+        )
     )
     if product is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Product not found")
-    active_addons = [a for a in product.addons if a.is_active]
+    active_addons = sorted(
+        (a for a in product.addons if a.is_active), key=lambda a: (a.sort_order, a.name)
+    )
     product_data = ProductDetailOut.model_validate(product).model_dump(mode="json")
     addon_data = [AddonOut.model_validate(a).model_dump(mode="json") for a in active_addons]
+
+    # مجموعات الخيارات المتاحة فقط، مع خياراتها المتاحة ومرتبة.
+    option_groups_data = []
+    for group in sorted((g for g in product.option_groups if g.is_available), key=lambda g: (g.sort_order, g.name)):
+        options = sorted((o for o in group.options if o.is_available), key=lambda o: (o.sort_order, o.name))
+        option_groups_data.append(
+            {
+                "id": group.id,
+                "name": group.name,
+                "is_required": group.is_required,
+                "allow_multiple": group.allow_multiple,
+                "min_selections": group.min_selections,
+                "max_selections": group.max_selections,
+                "options": [
+                    {"id": o.id, "name": o.name, "price_adjustment": float(o.price_adjustment)}
+                    for o in options
+                ],
+            }
+        )
+
     return templates.TemplateResponse(
         "public/product_detail.html",
-        {"request": request, "settings": restaurant_settings, "product": product_data, "addons": addon_data},
+        {
+            "request": request,
+            "settings": restaurant_settings,
+            "product": product_data,
+            "addons": addon_data,
+            "option_groups": option_groups_data,
+        },
     )
 
 
 @router.post("/orders", response_model=OrderCreated)
 def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCreated:
-    product_ids = [item.product_id for item in payload.items]
-    products = db.scalars(
-        select(Product)
-        .where(
-            Product.id.in_(product_ids),
-            Product.is_active.is_(True),
-            Product.is_available.is_(True),
-        )
-        .options(selectinload(Product.addons))
-    ).all()
-    products_by_id = {product.id: product for product in products}
-    if len(products_by_id) != len(product_ids):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Some products are unavailable")
+    # 1) موعد الطلب المجدول (استلام/توصيل) لازم يكون في المستقبل.
+    scheduled_time = validate_scheduled_time(payload.pickup_time)
 
-    # Collect all addon IDs across all cart items and fetch them
-    all_addon_ids: set[int] = set()
-    for item in payload.items:
-        all_addon_ids.update(item.addon_ids)
+    # 2) كل الحسابات تتعاد من Database — لا ثقة في أي سعر قادم من العميل.
+    pricing = compute_pricing(
+        db,
+        payload.items,
+        delivery_option_id=payload.delivery_option_id,
+        coupon_code=payload.coupon_code,
+    )
 
-    addons_by_id = {}
-    if all_addon_ids:
-        addons = db.scalars(
-            select(Addon).where(
-                Addon.id.in_(all_addon_ids),
-                Addon.is_active.is_(True),
-            )
-        ).all()
-        addons_by_id = {addon.id: addon for addon in addons}
-        if len(addons_by_id) != len(all_addon_ids):
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Some addons are unavailable")
-
-    total = Decimal("0.00")
+    # 3) بناء الطلب مع حفظ لقطة الأسعار وقت الإنشاء.
     order = Order(
         customer_name=payload.customer_name,
         customer_phone=payload.customer_phone,
-        customer_address=payload.customer_address,
+        customer_address=payload.customer_address or "",
         notes=payload.notes,
-        total=Decimal("0.00"),
+        status=OrderStatus.pending.value,
+        total=pricing.total,
         whatsapp_message="",
+        delivery_option_id=pricing.delivery_option.id if pricing.delivery_option else None,
+        coupon_id=pricing.coupon.id if pricing.coupon else None,
+        pickup_time=scheduled_time,
     )
 
-    message_items: List[Tuple[str, int, Decimal]] = []
-
-    for item in payload.items:
-        product = products_by_id[item.product_id]
-        selected_addons = [addons_by_id[aid] for aid in item.addon_ids if aid in addons_by_id]
-        addons_total = sum((a.price for a in selected_addons), Decimal("0.00"))
-        unit_price_with_addons = product.base_price + addons_total
-        line_total = unit_price_with_addons * item.quantity
-        total += line_total
-
+    message_items: List[Tuple[str, int, Decimal, Optional[str]]] = []
+    for line in pricing.lines:
         order_item = OrderItem(
-            product_id=product.id,
-            product_name=product.name,
-            unit_price=product.base_price,
-            quantity=item.quantity,
-            line_total=line_total,
+            product_id=line.product.id,
+            product_name=line.display_name,
+            unit_price=line.unit_price,
+            quantity=line.quantity,
+            line_total=line.line_total,
+            item_note=line.item_note,
         )
-        for addon in selected_addons:
+        for addon in line.addons:
             order_item.addons.append(
                 OrderItemAddon(addon_id=addon.id, name=addon.name, price=addon.price)
+            )
+        for option in line.options:
+            order_item.options.append(
+                OrderItemOption(
+                    option_id=option.id,
+                    group_name=option.group.name if option.group is not None else "",
+                    name=option.name,
+                    price_adjustment=option.price_adjustment,
+                )
             )
         order.items.append(order_item)
 
         addon_suffix = ""
-        if selected_addons:
-            addon_suffix = " + " + ", ".join(a.name for a in selected_addons)
-        message_items.append((product.name + addon_suffix, item.quantity, line_total))
-
-    order.total = total
+        if line.addons:
+            addon_suffix = " + " + ", ".join(a.name for a in line.addons)
+        message_items.append((line.display_name + addon_suffix, line.quantity, line.line_total, line.item_note))
 
     restaurant_settings = get_settings(db)
     message = build_whatsapp_message(
@@ -198,16 +204,32 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
         payload.customer_phone,
         payload.customer_address,
         message_items,
-        total,
-        payload.notes,
+        subtotal=pricing.subtotal,
+        discount_amount=pricing.discount_amount,
+        delivery_fee=pricing.delivery_fee,
+        delivery_name=pricing.delivery_option.name if pricing.delivery_option else None,
+        total=pricing.total,
+        notes=payload.notes,
+        pickup_time=scheduled_time,
+        coupon_code=pricing.coupon_code,
     )
     order.whatsapp_message = message
+
+    # 4) خصم استخدام الكوبون بعد نجاح الحساب.
+    if pricing.coupon is not None:
+        pricing.coupon.usage_count += 1
+        db.add(pricing.coupon)
 
     db.add(order)
     db.commit()
     db.refresh(order)
     return OrderCreated(
         order_id=order.id,
+        status=order.status,
+        subtotal=pricing.subtotal,
+        discount_amount=pricing.discount_amount,
+        delivery_fee=pricing.delivery_fee,
         total=order.total,
+        currency=restaurant_settings.currency,
         whatsapp_url=build_whatsapp_url(restaurant_settings.whatsapp_number, message),
     )

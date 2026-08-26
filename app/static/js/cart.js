@@ -12,18 +12,34 @@ const Cart = {
   write(items) {
     localStorage.setItem(CART_KEY, JSON.stringify(items));
   },
-  // نفس المنتج + نفس الإضافات = نفس السطر. نفس المنتج بإضافات مختلفة = سطور منفصلة.
-  lineId(productId, addonIds = []) {
-    return [productId, ...[...addonIds].sort((a, b) => a - b)].join("-");
+  // نفس المنتج + نفس الخيارات + نفس الإضافات + نفس الملاحظة = نفس السطر.
+  // اختلاف أي حاجة فيهم = سطر منفصل.
+  lineId(productId, optionIds = [], addonIds = [], note = "") {
+    const opt = [...optionIds].sort((a, b) => a - b).join(".");
+    const add = [...addonIds].sort((a, b) => a - b).join(".");
+    return [productId, opt, add, note || ""].join("-");
   },
   add(item) {
     const items = this.read();
-    const id = this.lineId(item.id, item.addonIds || []);
+    const optionIds = (item.optionIds || []).map(Number);
+    const addonIds = (item.addonIds || []).map(Number);
+    const id = this.lineId(item.id, optionIds, addonIds, item.item_note);
     const found = items.find((i) => i.lineId === id);
     if (found) {
       found.quantity = Math.min(999, found.quantity + item.quantity);
     } else {
-      items.push({ lineId: id, ...item });
+      items.push({
+        lineId: id,
+        id: item.id,
+        name: item.name,
+        price: Number(item.base_price ?? item.price ?? 0),
+        quantity: item.quantity,
+        options: item.options || [],
+        optionIds,
+        addons: item.addons || [],
+        addonIds,
+        item_note: item.item_note || "",
+      });
     }
     this.write(items);
     return items;
@@ -54,14 +70,18 @@ function storeCart() {
       return Number(value || 0).toFixed(2);
     },
 
-    // سعر الوحدة = سعر المنتج + الإضافات
+    // سعر الوحدة = سعر المنتج + الإضافات + الخيارات (للعرض فقط — الـBackend بيعيد التحقق)
     unitPrice(item) {
-      const base = Number(item.price || 0);
+      const base = Number(item.price ?? item.base_price ?? 0);
       const addons = (item.addons || []).reduce(
         (sum, a) => sum + Number(a.price || 0),
         0
       );
-      return base + addons;
+      const options = (item.options || []).reduce(
+        (sum, o) => sum + Number(o.price_adjustment || 0),
+        0
+      );
+      return base + addons + options;
     },
     // إجمالي السطر = سعر الوحدة × الكمية
     lineTotal(item) {
@@ -90,8 +110,9 @@ function storeCart() {
 
     add(product) {
       const qty = Math.floor(Number(product.quantity || 1)) || 1;
+      const optionIds = (product.optionIds || []).map(Number);
       const addonIds = (product.addonIds || []).map(Number);
-      const id = Cart.lineId(product.id, addonIds);
+      const id = Cart.lineId(product.id, optionIds, addonIds, product.item_note);
       const found = this.items.find((i) => i.lineId === id);
       if (found) {
         found.quantity = Math.min(999, found.quantity + qty);
@@ -100,10 +121,13 @@ function storeCart() {
           lineId: id,
           id: product.id,
           name: product.name,
-          price: Number(product.base_price || 0),
+          price: Number(product.base_price ?? product.price ?? 0),
           quantity: qty,
+          options: product.options || [],
+          optionIds,
           addons: product.addons || [],
-          addonIds: addonIds,
+          addonIds,
+          item_note: product.item_note || "",
         });
       }
       this.persist();
@@ -146,12 +170,19 @@ function storeCart() {
             items: this.items.map((i) => ({
               product_id: i.id,
               quantity: i.quantity,
+              option_ids: (i.optionIds || []).map(Number),
               addon_ids: (i.addonIds || []).map(Number),
+              item_note: i.item_note || null,
             })),
           }),
         });
         if (!resp.ok) {
-          this.error = "راجع بيانات الطلب.";
+          let msg = "راجع بيانات الطلب.";
+          try {
+            const detail = (await resp.json()).detail;
+            if (detail) msg = detail;
+          } catch {}
+          this.error = msg;
           return;
         }
         const data = await resp.json();
@@ -168,16 +199,53 @@ function storeCart() {
 }
 
 // ===== صفحة تفاصيل المنتج (Alpine) =====
-function productDetail(product, addons) {
+function productDetail(product, addons, optionGroups) {
   return {
     product,
     addons,
+    optionGroups: optionGroups || [],
+    groupSelections: {}, // groupId -> [optionId, ...]
     selectedAddons: [],
     quantity: 1,
+    itemNote: "",
+    error: "",
+
+    init() {
+      for (const g of this.optionGroups) this.groupSelections[g.id] = [];
+    },
 
     formatPrice(value) {
       return Number(value || 0).toFixed(2);
     },
+
+    pickedIds(group) {
+      return this.groupSelections[group.id] || [];
+    },
+    isPicked(group, option) {
+      return this.pickedIds(group).includes(option.id);
+    },
+    // مجموعات الاختيار الواحد (Radio)
+    pickOne(group, option) {
+      this.groupSelections[group.id] = [option.id];
+      this.error = "";
+    },
+    // مجموعات الاختيار المتعدد (Checkbox) مع احترام الحد الأقصى
+    togglePick(group, option) {
+      let ids = [...this.pickedIds(group)];
+      if (ids.includes(option.id)) {
+        ids = ids.filter((i) => i !== option.id);
+        this.error = "";
+      } else {
+        if (group.max_selections && ids.length >= group.max_selections) {
+          this.error = `الحد الأقصى للاختيارات من "${group.name}" هو ${group.max_selections}`;
+          return;
+        }
+        ids.push(option.id);
+        this.error = "";
+      }
+      this.groupSelections[group.id] = ids;
+    },
+
     chosenAddons() {
       return this.addons.filter(
         (a) => a.is_active && this.selectedAddons.includes(a.id)
@@ -189,8 +257,26 @@ function productDetail(product, addons) {
         0
       );
     },
+    chosenOptions() {
+      const out = [];
+      for (const g of this.optionGroups) {
+        for (const o of g.options) {
+          if (this.pickedIds(g).includes(o.id)) out.push(o);
+        }
+      }
+      return out;
+    },
+    optionsTotal() {
+      return this.chosenOptions().reduce(
+        (sum, o) => sum + Number(o.price_adjustment || 0),
+        0
+      );
+    },
     totalPrice() {
-      return (Number(this.product.base_price || 0) + this.addonTotal()) * this.quantity;
+      return (
+        (Number(this.product.base_price || 0) + this.addonTotal() + this.optionsTotal()) *
+        this.quantity
+      );
     },
     inc() {
       this.quantity = Math.min(999, this.quantity + 1);
@@ -198,8 +284,31 @@ function productDetail(product, addons) {
     dec() {
       this.quantity = Math.max(1, this.quantity - 1);
     },
+
+    // التحقق من قواعد المجموعات: إجبارية + حد أدنى (للعرض وتجربة المستخدم — الـBackend بيأكد نهائيًا)
+    validateSelections() {
+      for (const g of this.optionGroups) {
+        const count = this.pickedIds(g).length;
+        const min = Math.max(g.is_required ? 1 : 0, g.min_selections || 0);
+        if (count < min) {
+          this.error = min > 1
+            ? `من فضلك اختر ${min} خيارات على الأقل من "${g.name}"`
+            : `من فضلك اختر خيارًا من "${g.name}"`;
+          return false;
+        }
+      }
+      this.error = "";
+      return true;
+    },
+
     addToCart() {
-      const chosen = this.chosenAddons().map((a) => ({
+      if (!this.validateSelections()) return;
+      const chosenOptions = this.chosenOptions().map((o) => ({
+        id: o.id,
+        name: o.name,
+        price_adjustment: Number(o.price_adjustment),
+      }));
+      const chosenAddons = this.chosenAddons().map((a) => ({
         id: a.id,
         name: a.name,
         price: Number(a.price),
@@ -209,8 +318,11 @@ function productDetail(product, addons) {
         name: this.product.name,
         base_price: Number(this.product.base_price),
         quantity: this.quantity,
-        addons: chosen,
-        addonIds: chosen.map((a) => a.id),
+        options: chosenOptions,
+        optionIds: chosenOptions.map((o) => o.id),
+        addons: chosenAddons,
+        addonIds: chosenAddons.map((a) => a.id),
+        item_note: (this.itemNote || "").trim(),
       });
       window.location.href = "/";
     },

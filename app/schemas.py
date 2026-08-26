@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 from typing import List, Optional
@@ -55,21 +56,120 @@ class AddonForm(BaseModel):
 class CartItemIn(BaseModel):
     product_id: int = Field(gt=0)
     quantity: int = Field(ge=1, le=999)
+    option_id: Optional[int] = Field(default=None, gt=0)  #legacy: خيار واحد
+    option_ids: List[int] = Field(default=[])
     addon_ids: List[int] = Field(default=[])
+    item_note: Optional[str] = Field(default=None, max_length=500)
 
 
 class OrderCreate(BaseModel):
     customer_name: str = Field(min_length=2, max_length=120)
     customer_phone: str = Field(min_length=8, max_length=30)
-    customer_address: str = Field(min_length=5, max_length=350)
+    # العنوان اختياري عشان طلبات الاستلام من المطعم مش محتاجة عنوان.
+    customer_address: Optional[str] = Field(default=None, min_length=5, max_length=350)
     notes: Optional[str] = Field(default=None, max_length=1000)
     items: List[CartItemIn] = Field(min_length=1)
+    delivery_option_id: Optional[int] = Field(default=None, gt=0)
+    coupon_code: Optional[str] = Field(default=None, max_length=50)
+    pickup_time: Optional[datetime] = None
 
 
 class OrderCreated(BaseModel):
     order_id: int
+    status: str
+    subtotal: Decimal
+    discount_amount: Decimal
+    delivery_fee: Decimal
     total: Decimal
+    currency: str
     whatsapp_url: str
+
+
+class DeliveryOptionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    description: Optional[str]
+    fee: Decimal
+    estimated_time: Optional[str]
+
+
+class ProductOptionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    price_adjustment: Decimal
+    is_available: bool
+    sort_order: int
+
+
+class OptionGroupOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    is_required: bool
+    allow_multiple: bool
+    min_selections: int
+    max_selections: Optional[int]
+    sort_order: int
+    options: List[ProductOptionOut] = []
+
+
+class CategoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    slug: str
+    description: Optional[str]
+    image_url: Optional[str]
+    is_featured: bool
+
+
+class OrderPreviewIn(BaseModel):
+    items: List[CartItemIn] = Field(min_length=1)
+    delivery_option_id: Optional[int] = Field(default=None, gt=0)
+    coupon_code: Optional[str] = Field(default=None, max_length=50)
+
+
+class CouponValidateIn(BaseModel):
+    code: str = Field(min_length=1, max_length=50)
+    items: List[CartItemIn] = Field(min_length=1)
+
+
+class CouponValidateOut(BaseModel):
+    valid: bool
+    code: str
+    discount_type: Optional[str] = None
+    discount_value: Optional[Decimal] = None
+    discount_amount: Decimal = Decimal("0.00")
+    subtotal: Decimal = Decimal("0.00")
+    message: str = ""
+
+
+class OrderPreviewItemOut(BaseModel):
+    product_id: int
+    name: str
+    unit_price: Decimal
+    quantity: int
+    addons_total: Decimal
+    line_total: Decimal
+    options: List[str] = []
+    item_note: Optional[str] = None
+
+
+class OrderPreviewOut(BaseModel):
+    items: List[OrderPreviewItemOut]
+    subtotal: Decimal
+    discount_amount: Decimal
+    delivery_fee: Decimal
+    total: Decimal
+    currency: str
+    coupon_valid: Optional[bool] = None
+    coupon_message: Optional[str] = None
 
 
 class AddonOut(BaseModel):
@@ -87,12 +187,16 @@ class ProductDetailOut(BaseModel):
 
     id: int
     name: str
+    slug: str
     base_price: Decimal
     unit: str
     description: Optional[str]
     image_url: Optional[str]
     is_available: bool
     is_active: bool
+    category: Optional[CategoryOut] = None
+    options: List[ProductOptionOut] = []
+    option_groups: List[OptionGroupOut] = []
     addons: List[AddonOut] = []
 
 
@@ -108,10 +212,13 @@ class ProductOut(BaseModel):
 
     id: int
     name: str
+    slug: str
     base_price: Decimal
     unit: str
+    description: Optional[str]
     image_url: Optional[str]
     is_available: bool
+    category: Optional[CategoryOut] = None
 
 
 class DashboardSummary(BaseModel):

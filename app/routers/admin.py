@@ -14,7 +14,17 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.deps import get_current_admin, verify_admin_csrf
-from app.models import Admin, Addon, Category, Order, OrderItem, Product, RestaurantSettings
+from app.models import (
+    Admin,
+    Addon,
+    Category,
+    Order,
+    OrderItem,
+    Product,
+    ProductOption,
+    ProductOptionGroup,
+    RestaurantSettings,
+)
 from app.schemas import OrderStatus
 from app.security import csrf_field
 from app.utils import make_slug, save_image
@@ -258,6 +268,116 @@ def delete_addon(product_id: int, addon_id: int, db: Session = Depends(get_db)) 
     db.delete(addon)
     db.commit()
     return redirect(f"/admin/products/{product_id}/addons")
+
+
+@router.get("/products/{product_id}/options", response_class=HTMLResponse)
+def manage_options(product_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Product not found")
+    groups = db.scalars(
+        select(ProductOptionGroup)
+        .where(ProductOptionGroup.product_id == product_id)
+        .options(selectinload(ProductOptionGroup.options))
+        .order_by(ProductOptionGroup.sort_order, ProductOptionGroup.name)
+    ).all()
+    for group in groups:
+        group.options = sorted(group.options, key=lambda o: (o.sort_order, o.name))
+    return templates.TemplateResponse(
+        "admin/options.html",
+        {"request": request, "product": product, "groups": groups},
+    )
+
+
+@router.post("/products/{product_id}/options/groups")
+def save_option_group(
+    product_id: int,
+    id: Optional[int] = Form(default=None),
+    name: str = Form(...),
+    is_required: bool = Form(default=False),
+    allow_multiple: bool = Form(default=False),
+    min_selections: int = Form(default=0),
+    max_selections_raw: Optional[str] = Form(default=None, alias="max_selections"),
+    sort_order: int = Form(default=0),
+    is_available: bool = Form(default=False),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Product not found")
+    group = db.get(ProductOptionGroup, id) if id else ProductOptionGroup(product_id=product_id)
+    if id and (group is None or group.product_id != product_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Option group not found")
+    max_selections: Optional[int] = None
+    if max_selections_raw not in (None, ""):
+        try:
+            max_selections = int(max_selections_raw)
+        except ValueError:
+            max_selections = None
+    if min_selections < 0:
+        min_selections = 0
+    if max_selections is not None and max_selections < 1:
+        max_selections = None
+    group.name = name
+    group.is_required = is_required
+    group.allow_multiple = allow_multiple
+    group.min_selections = min_selections
+    group.max_selections = max_selections
+    group.sort_order = sort_order
+    group.is_available = is_available
+    db.add(group)
+    db.commit()
+    return redirect(f"/admin/products/{product_id}/options")
+
+
+@router.post("/products/{product_id}/options/groups/{group_id}/delete")
+def delete_option_group(product_id: int, group_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    group = db.get(ProductOptionGroup, group_id)
+    if group is None or group.product_id != product_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Option group not found")
+    db.delete(group)
+    db.commit()
+    return redirect(f"/admin/products/{product_id}/options")
+
+
+@router.post("/products/{product_id}/options")
+def save_product_option(
+    product_id: int,
+    group_id: int = Form(...),
+    id: Optional[int] = Form(default=None),
+    name: str = Form(...),
+    price_adjustment: Decimal = Form(default=Decimal("0.00")),
+    is_available: bool = Form(default=False),
+    sort_order: int = Form(default=0),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Product not found")
+    group = db.get(ProductOptionGroup, group_id)
+    if group is None or group.product_id != product_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Option group not found")
+    option = db.get(ProductOption, id) if id else ProductOption(product_id=product_id)
+    if id and (option is None or option.product_id != product_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Option not found")
+    option.group_id = group.id
+    option.name = name
+    option.price_adjustment = price_adjustment
+    option.is_available = is_available
+    option.sort_order = sort_order
+    db.add(option)
+    db.commit()
+    return redirect(f"/admin/products/{product_id}/options")
+
+
+@router.post("/products/{product_id}/options/{option_id}/delete")
+def delete_product_option(product_id: int, option_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    option = db.get(ProductOption, option_id)
+    if option is None or option.product_id != product_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Option not found")
+    db.delete(option)
+    db.commit()
+    return redirect(f"/admin/products/{product_id}/options")
 
 
 @router.get("/orders", response_class=HTMLResponse)

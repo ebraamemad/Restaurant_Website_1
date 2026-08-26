@@ -59,6 +59,9 @@ class Product(Base):
     category: Mapped[Category] = relationship(back_populates="products")
     order_items: Mapped[List["OrderItem"]] = relationship(back_populates="product")
     options: Mapped[List["ProductOption"]] = relationship(back_populates="product")
+    option_groups: Mapped[List["ProductOptionGroup"]] = relationship(
+        back_populates="product", cascade="all, delete-orphan"
+    )
     addons: Mapped[List["Addon"]] = relationship(back_populates="product", cascade="all, delete-orphan")
 
 
@@ -110,11 +113,13 @@ class OrderItem(Base):
     unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     quantity: Mapped[int] = mapped_column(Integer)
     line_total: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    item_note: Mapped[Optional[str]] = mapped_column(Text)  # ملاحظة خاصة بهذا السطر/المنتج
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     order: Mapped[Order] = relationship(back_populates="items")
     product: Mapped[Product] = relationship(back_populates="order_items")
     addons: Mapped[List["OrderItemAddon"]] = relationship(back_populates="order_item", cascade="all, delete-orphan")
+    options: Mapped[List["OrderItemOption"]] = relationship(back_populates="order_item", cascade="all, delete-orphan")
 
 
 class OrderItemAddon(Base):
@@ -128,6 +133,22 @@ class OrderItemAddon(Base):
 
     order_item: Mapped[OrderItem] = relationship(back_populates="addons")
     addon: Mapped[Optional["Addon"]] = relationship(back_populates="order_item_addons")
+
+
+class OrderItemOption(Base):
+    """لقطة الخيار المختار وقت الطلب — بتحفظ الاسم والسعر حتى لو الخيار اتعدل/اتحذف بعد كده."""
+
+    __tablename__ = "order_item_options"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_item_id: Mapped[int] = mapped_column(ForeignKey("order_items.id", ondelete="CASCADE"), index=True)
+    option_id: Mapped[Optional[int]] = mapped_column(ForeignKey("product_options.id", ondelete="SET NULL"), index=True)
+    group_name: Mapped[str] = mapped_column(String(120), default="")
+    name: Mapped[str] = mapped_column(String(120))
+    price_adjustment: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+
+    order_item: Mapped[OrderItem] = relationship(back_populates="options")
+    option: Mapped[Optional["ProductOption"]] = relationship(back_populates="order_item_options")
 
 
 class RestaurantSettings(Base):
@@ -150,11 +171,41 @@ class RestaurantSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class ProductOptionGroup(Base):
+    """مجموعة خيارات/مقاسات للمنتج — مثال: مجموعة "الحجم" بخيارات صغير/وسط/كبير.
+
+    إعدادات المجموعة بتتحكم في سلوك الاختيار عند العميل:
+    - is_required: هل لازم العميل يختار من المجموعة دي؟
+    - allow_multiple: هل مسموح اختيار أكتر من خيار واحد؟
+    - min_selections / max_selections: حدود عدد الاختيارات.
+    """
+
+    __tablename__ = "product_option_groups"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)  # مثال: "الحجم"
+    is_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    allow_multiple: Mapped[bool] = mapped_column(Boolean, default=False)
+    min_selections: Mapped[int] = mapped_column(Integer, default=0)
+    max_selections: Mapped[Optional[int]] = mapped_column(Integer)  # NULL = بلا حد أقصى
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_available: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    product: Mapped["Product"] = relationship(back_populates="option_groups")
+    options: Mapped[List["ProductOption"]] = relationship(back_populates="group", cascade="all, delete-orphan")
+
+
 class ProductOption(Base):
     __tablename__ = "product_options"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
+    group_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("product_option_groups.id", ondelete="CASCADE"), index=True
+    )
     name: Mapped[str] = mapped_column(String(120), nullable=False)  # مثال: "صغير", "وسط", "كبير"
     price_adjustment: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))  # تعديل السعر
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -163,6 +214,8 @@ class ProductOption(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     product: Mapped["Product"] = relationship(back_populates="options")
+    group: Mapped[Optional["ProductOptionGroup"]] = relationship(back_populates="options")
+    order_item_options: Mapped[List["OrderItemOption"]] = relationship(back_populates="option")
 
 
 class Coupon(Base):

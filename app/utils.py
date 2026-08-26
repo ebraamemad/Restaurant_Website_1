@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import unicodedata
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -25,6 +27,36 @@ def money(value: Decimal) -> str:
     return f"{value:.2f}"
 
 
+def ensure_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def normalize_search_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = normalized.lower().strip()
+    normalized = re.sub(r"[^a-z0-9\u0600-\u06ff]+", " ", normalized)
+    return " ".join(normalized.split())
+
+
+def build_search_variants(value: str) -> List[str]:
+    raw = (value or "").strip()
+    if not raw:
+        return []
+
+    variants = {raw, normalize_search_text(raw)}
+    cleaned = normalize_search_text(raw)
+    if cleaned:
+        variants.add(cleaned.replace(" ", ""))
+        variants.add(cleaned.replace("ة", "ه"))
+        variants.add(cleaned.replace("ي", "ى"))
+        variants.add(cleaned.replace("ى", "ي"))
+
+    return [variant for variant in variants if variant]
+
+
 async def save_image(upload: UploadFile, folder: Path) -> str:
     extension = ALLOWED_IMAGE_TYPES.get(upload.content_type or "")
     if extension is None:
@@ -45,23 +77,42 @@ def build_whatsapp_message(
     settings: RestaurantSettings,
     customer_name: str,
     customer_phone: str,
-    customer_address: str,
-    items: List[Tuple[str, int, Decimal]],
+    customer_address: Optional[str],
+    items: List[Tuple[str, int, Decimal, Optional[str]]],
+    subtotal: Decimal,
+    discount_amount: Decimal,
+    delivery_fee: Decimal,
+    delivery_name: Optional[str],
     total: Decimal,
     notes: Optional[str],
+    pickup_time: Optional[datetime] = None,
+    coupon_code: Optional[str] = None,
 ) -> str:
     lines = [
         f"طلب جديد من {settings.restaurant_name}",
         "",
         f"الاسم: {customer_name}",
         f"الهاتف: {customer_phone}",
-        f"العنوان: {customer_address}",
-        "",
-        "المنتجات:",
     ]
-    for name, quantity, line_total in items:
+    if customer_address:
+        lines.append(f"العنوان: {customer_address}")
+    if delivery_name:
+        lines.append(f"طريقة الاستلام: {delivery_name}")
+    if pickup_time is not None:
+        lines.append(f"موعد الطلب: {ensure_aware(pickup_time).strftime('%Y-%m-%d %H:%M')}")
+    lines.extend(["", "المنتجات:"])
+    for name, quantity, line_total, item_note in items:
         lines.append(f"- {name} x {quantity} = {money(line_total)}")
-    lines.extend(["", f"الإجمالي: {money(total)} {settings.currency}"])
+        if item_note:
+            lines.append(f"  ملاحظة: {item_note}")
+    lines.append("")
+    lines.append(f"الإجمالي الفرعي: {money(subtotal)} {settings.currency}")
+    if discount_amount > 0:
+        suffix = f" (كوبون: {coupon_code})" if coupon_code else ""
+        lines.append(f"الخصم: -{money(discount_amount)} {settings.currency}{suffix}")
+    if delivery_fee > 0:
+        lines.append(f"رسوم التوصيل: {money(delivery_fee)} {settings.currency}")
+    lines.append(f"الإجمالي: {money(total)} {settings.currency}")
     if notes:
         lines.extend(["", f"ملاحظات: {notes}"])
     return "\n".join(lines)

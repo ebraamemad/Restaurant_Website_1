@@ -27,10 +27,18 @@
           <td class="p-3">
             {% for item in order.items %}
               <div>{{ item.product_name }} x {{ item.quantity }}
+                {% if item.options %}
+                  <div class="text-xs text-indigo-600">
+                    {% for opt in item.options %}{{ opt.group_name ~ ": " if opt.group_name }}{{ opt.name }} (+{{ opt.price_adjustment }}){% if not loop.last %}, {% endif %}{% endfor %}
+                  </div>
+                {% endif %}
                 {% if item.addons %}
                   <div class="text-xs text-slate-500">
                     {% for addon in item.addons %}+ {{ addon.name }} ({{ addon.price }}){% if not loop.last %}, {% endif %}{% endfor %}
                   </div>
+                {% endif %}
+                {% if item.item_note %}
+                  <div class="text-xs text-amber-700">📝 {{ item.item_note }}</div>
                 {% endif %}
               </div>
             {% endfor %}
