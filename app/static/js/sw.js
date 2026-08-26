@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fresh-store-cache-v1';
+const CACHE_NAME = 'restaurant-cache-v1';
 const STATIC_ASSETS = [
   '/',
   '/static/manifest.json',

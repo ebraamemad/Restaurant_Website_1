@@ -22,7 +22,7 @@
           <p class="mt-2 text-sm text-slate-600">{{ product.description }}</p>
         {% endif %}
         <div class="mt-4">
-          <p class="text-2xl font-extrabold text-primary">{{ product.price }} {{ settings.currency }}</p>
+          <p class="text-2xl font-extrabold text-primary">{{ product.base_price }} {{ settings.currency }}</p>
           {% if product.unit %}<span class="text-xs text-slate-500"> / {{ product.unit }}</span>{% endif %}
         </div>
       </div>

@@ -100,7 +100,7 @@ function storeCart() {
           lineId: id,
           id: product.id,
           name: product.name,
-          price: Number(product.price || 0),
+          price: Number(product.base_price || 0),
           quantity: qty,
           addons: product.addons || [],
           addonIds: addonIds,
@@ -190,7 +190,7 @@ function productDetail(product, addons) {
       );
     },
     totalPrice() {
-      return (Number(this.product.price || 0) + this.addonTotal()) * this.quantity;
+      return (Number(this.product.base_price || 0) + this.addonTotal()) * this.quantity;
     },
     inc() {
       this.quantity = Math.min(999, this.quantity + 1);
@@ -207,7 +207,7 @@ function productDetail(product, addons) {
       Cart.add({
         id: this.product.id,
         name: this.product.name,
-        price: Number(this.product.price),
+        base_price: Number(this.product.base_price),
         quantity: this.quantity,
         addons: chosen,
         addonIds: chosen.map((a) => a.id),

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from decimal import Decimal
+from pathlib import Path
 from typing import List, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -12,18 +13,19 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
-from app.models import Addon, Category, Order, OrderItem, OrderItemAddon, Product, StoreSettings
+from app.models import Addon, Category, Order, OrderItem, OrderItemAddon, Product, RestaurantSettings
 from app.schemas import AddonOut, OrderCreate, OrderCreated, ProductDetailOut
 from app.utils import build_whatsapp_message, build_whatsapp_url
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
+TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
-def get_settings(db: Session) -> StoreSettings:
-    settings = db.scalar(select(StoreSettings))
+def get_settings(db: Session) -> RestaurantSettings:
+    settings = db.scalar(select(RestaurantSettings))
     if settings is None:
-        settings = StoreSettings()
+        settings = RestaurantSettings()
         db.add(settings)
         db.commit()
         db.refresh(settings)
@@ -56,7 +58,7 @@ def build_search_variants(value: str) -> List[str]:
 
 @router.get("/", response_class=HTMLResponse)
 def home(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
-    store_settings = get_settings(db)
+    restaurant_settings = get_settings(db)
     categories = db.scalars(
         select(Category)
         .where(Category.is_active.is_(True))
@@ -70,13 +72,13 @@ def home(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     ).all()
     return templates.TemplateResponse(
         "public/home.html",
-        {"request": request, "settings": store_settings, "categories": categories, "products": products},
+        {"request": request, "settings": restaurant_settings, "categories": categories, "products": products},
     )
 
 
 @router.get("/search", response_class=HTMLResponse)
 def search_products(request: Request, q: str = "", db: Session = Depends(get_db)) -> HTMLResponse:
-    store_settings = get_settings(db)
+    restaurant_settings = get_settings(db)
     statement = select(Product).where(Product.is_active.is_(True))
     query = (q or "").strip()
 
@@ -93,13 +95,13 @@ def search_products(request: Request, q: str = "", db: Session = Depends(get_db)
     products = db.scalars(statement.order_by(Product.sort_order, Product.name)).all()
     return templates.TemplateResponse(
         "public/partials/product_grid.html",
-        {"request": request, "settings": store_settings, "products": products},
+        {"request": request, "settings": restaurant_settings, "products": products},
     )
 
 
 @router.get("/products/{product_slug}", response_class=HTMLResponse)
 def product_detail(request: Request, product_slug: str, db: Session = Depends(get_db)) -> HTMLResponse:
-    store_settings = get_settings(db)
+    restaurant_settings = get_settings(db)
     product = db.scalar(
         select(Product)
         .where(Product.slug == product_slug, Product.is_active.is_(True), Product.is_available.is_(True))
@@ -112,7 +114,7 @@ def product_detail(request: Request, product_slug: str, db: Session = Depends(ge
     addon_data = [AddonOut.model_validate(a).model_dump(mode="json") for a in active_addons]
     return templates.TemplateResponse(
         "public/product_detail.html",
-        {"request": request, "settings": store_settings, "product": product_data, "addons": addon_data},
+        {"request": request, "settings": restaurant_settings, "product": product_data, "addons": addon_data},
     )
 
 
@@ -159,39 +161,39 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
         whatsapp_message="",
     )
 
-    message_items: List[Tuple[str, int, Decimal, Decimal]] = []
+    message_items: List[Tuple[str, int, Decimal]] = []
 
     for item in payload.items:
         product = products_by_id[item.product_id]
         selected_addons = [addons_by_id[aid] for aid in item.addon_ids if aid in addons_by_id]
         addons_total = sum((a.price for a in selected_addons), Decimal("0.00"))
-        unit_price_with_addons = product.price + addons_total
+        unit_price_with_addons = product.base_price + addons_total
         line_total = unit_price_with_addons * item.quantity
         total += line_total
 
         order_item = OrderItem(
             product_id=product.id,
             product_name=product.name,
-            unit_price=product.price,
+            unit_price=product.base_price,
             quantity=item.quantity,
             line_total=line_total,
         )
         for addon in selected_addons:
             order_item.addons.append(
-                OrderItemAddon(name=addon.name, price=addon.price)
+                OrderItemAddon(addon_id=addon.id, name=addon.name, price=addon.price)
             )
         order.items.append(order_item)
 
         addon_suffix = ""
         if selected_addons:
             addon_suffix = " + " + ", ".join(a.name for a in selected_addons)
-        message_items.append((product.name + addon_suffix, item.quantity, product.price, line_total))
+        message_items.append((product.name + addon_suffix, item.quantity, line_total))
 
     order.total = total
 
-    store_settings = get_settings(db)
+    restaurant_settings = get_settings(db)
     message = build_whatsapp_message(
-        store_settings,
+        restaurant_settings,
         payload.customer_name,
         payload.customer_phone,
         payload.customer_address,
@@ -207,5 +209,5 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
     return OrderCreated(
         order_id=order.id,
         total=order.total,
-        whatsapp_url=build_whatsapp_url(store_settings.whatsapp_number, message),
+        whatsapp_url=build_whatsapp_url(restaurant_settings.whatsapp_number, message),
     )

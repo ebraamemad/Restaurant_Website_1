@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: fresh-store
+    name: restaurant-system
     env: python
     plan: free
     region: oregon

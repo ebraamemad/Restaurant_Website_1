@@ -2,7 +2,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import Admin, StoreSettings
+from app.models import Admin, RestaurantSettings
 from app.security import hash_password
 
 
@@ -14,14 +14,14 @@ def main() -> None:
                 Admin(
                     username=settings.admin_username,
                     password_hash=hash_password(settings.admin_password),
-                    full_name="Store Admin",
+                    full_name="Restaurant Admin",
                 )
             )
-        store_settings = db.scalar(select(StoreSettings))
-        if store_settings is None:
-            db.add(StoreSettings(store_name=settings.app_name))
+        restaurant_settings = db.scalar(select(RestaurantSettings))
+        if restaurant_settings is None:
+            db.add(RestaurantSettings(restaurant_name=settings.app_name))
         db.commit()
-    print("Admin and store settings are ready.")
+    print("Admin and restaurant settings are ready.")
 
 
 if __name__ == "__main__":

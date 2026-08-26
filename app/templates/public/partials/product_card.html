@@ -45,7 +45,7 @@
 
                 <p class="text-lg font-extrabold text-primary sm:text-2xl">
 
-                    {{ product.price }}
+                    {{ product.base_price }}
 
                 </p>
 
@@ -74,7 +74,7 @@
             @click='add({
                 id: {{ product.id }},
                 name: {{ product.name|tojson|safe }},
-                price: {{ product.price }},
+                base_price: {{ product.base_price }},
                 quantity: qtyMap[{{ product.id }}] || 1
             })'
 

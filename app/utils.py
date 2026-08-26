@@ -10,7 +10,7 @@ from uuid import uuid4
 from fastapi import HTTPException, UploadFile, status
 from slugify import slugify
 
-from app.models import StoreSettings
+from app.models import RestaurantSettings
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 MAX_IMAGE_SIZE = 3 * 1024 * 1024
@@ -42,16 +42,16 @@ async def save_image(upload: UploadFile, folder: Path) -> str:
 
 
 def build_whatsapp_message(
-    settings: StoreSettings,
+    settings: RestaurantSettings,
     customer_name: str,
     customer_phone: str,
     customer_address: str,
-    items: List[Tuple[str, int, Decimal, Decimal]],
+    items: List[Tuple[str, int, Decimal]],
     total: Decimal,
     notes: Optional[str],
 ) -> str:
     lines = [
-        f"طلب جديد من {settings.store_name}",
+        f"طلب جديد من {settings.restaurant_name}",
         "",
         f"الاسم: {customer_name}",
         f"الهاتف: {customer_phone}",
@@ -59,7 +59,7 @@ def build_whatsapp_message(
         "",
         "المنتجات:",
     ]
-    for name, quantity, unit_price, line_total in items:
+    for name, quantity, line_total in items:
         lines.append(f"- {name} x {quantity} = {money(line_total)}")
     lines.extend(["", f"الإجمالي: {money(total)} {settings.currency}"])
     if notes:

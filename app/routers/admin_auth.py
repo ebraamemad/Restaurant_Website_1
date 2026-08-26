@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, Form, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -8,11 +10,14 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
+from app.deps import verify_admin_csrf
 from app.models import Admin
-from app.security import AUTH_COOKIE_NAME, create_access_token, verify_password
+from app.security import AUTH_COOKIE_NAME, create_access_token, csrf_field, verify_password
 
-router = APIRouter(prefix="/admin")
-templates = Jinja2Templates(directory="app/templates")
+router = APIRouter(prefix="/admin", dependencies=[Depends(verify_admin_csrf)])
+TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+templates.env.globals["csrf_field"] = csrf_field
 
 
 @router.get("/login", response_class=HTMLResponse)

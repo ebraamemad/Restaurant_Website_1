@@ -56,7 +56,7 @@ class Settings(BaseSettings):
 
     
 
-    app_name: str = "Fresh Store"
+    app_name: str = "Restaurant"
     app_env: str = "development" # هل المشروعD evelopment or اProduction.
     app_secret_key: str# مفتاج تشفير البيانات زي كلمات السر.
     database_url: str# وده رابط PostgreSQL.

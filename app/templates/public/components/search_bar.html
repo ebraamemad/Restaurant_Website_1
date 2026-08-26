@@ -1,9 +1,33 @@
-<div class="mb-5 sm:mb-6">
+<div class="mb-5 sm:mb-6" x-data="{
+    q: '',
+    busy: false,
+    async search() {
+        this.busy = true;
+        try {
+            const resp = await fetch('/search?q=' + encodeURIComponent(this.q));
+            if (!resp.ok) return;
+            document.getElementById('products').innerHTML = await resp.text();
+        } finally {
+            this.busy = false;
+        }
+    }
+}">
 
-    <div class="card p-4 text-center text-sm text-slate-500">
+    <form class="card flex items-center gap-2 p-3" @submit.prevent="search()">
 
-        البحث غير متاح暂ًّا.
+        <input
+            x-model.trim="q"
+            type="search"
+            placeholder="ابحث عن منتج..."
+            class="flex-1 rounded-xl border border-slate-200 p-3 text-sm focus:border-primary focus:outline-none">
 
-    </div>
+        <button
+            type="submit"
+            :disabled="busy"
+            class="rounded-xl bg-primary px-5 py-3 text-sm font-bold text-white transition hover:bg-secondary disabled:opacity-50">
+            بحث
+        </button>
+
+    </form>
 
 </div>

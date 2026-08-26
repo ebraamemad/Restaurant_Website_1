@@ -14,6 +14,7 @@
           <td class="p-3 font-bold">{{ order.total }}</td>
           <td class="p-3">
             <form method="post" action="/admin/orders/{{ order.id }}/status">
+              {{ csrf_field(request) }}
               <select name="status_value" class="rounded border px-2 py-1" onchange="this.form.submit()">
                 {% for status in statuses | default([]) %}
                   <option value="{{ status.value }}" {% if order.status == status.value %}selected{% endif %}>{{ status_labels[status.value] }}</option>

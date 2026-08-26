@@ -4,7 +4,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OrderStatus(str, Enum):
@@ -26,20 +26,23 @@ class ProductForm(BaseModel):
     category_id: int = Field(gt=0)
     name: str = Field(min_length=2, max_length=160)
     description: Optional[str] = Field(default=None, max_length=2000)
-    price: Decimal = Field(gt=0, decimal_places=2)
-    unit: str = Field(default="kg", min_length=1, max_length=40)
+    base_price: Decimal = Field(gt=0, decimal_places=2)
+    unit: str = Field(default="piece", min_length=1, max_length=40)
     sort_order: int = Field(default=0, ge=0)
     is_available: bool = True
     is_active: bool = True
 
 
 class SettingsForm(BaseModel):
-    store_name: str = Field(min_length=2, max_length=160)
+    restaurant_name: str = Field(min_length=2, max_length=160)
     whatsapp_number: str = Field(min_length=8, max_length=30)
     phone_number: Optional[str] = Field(default=None, max_length=30)
     address: Optional[str] = Field(default=None, max_length=300)
     working_hours: Optional[str] = Field(default=None, max_length=250)
     currency: str = Field(default="EGP", min_length=1, max_length=10)
+    facebook_url: Optional[str] = Field(default=None, max_length=500)
+    tiktok_url: Optional[str] = Field(default=None, max_length=500)
+    additional_info: Optional[str] = Field(default=None, max_length=2000)
 
 
 class AddonForm(BaseModel):
@@ -84,7 +87,7 @@ class ProductDetailOut(BaseModel):
 
     id: int
     name: str
-    price: Decimal
+    base_price: Decimal
     unit: str
     description: Optional[str]
     image_url: Optional[str]
@@ -105,7 +108,7 @@ class ProductOut(BaseModel):
 
     id: int
     name: str
-    price: Decimal
+    base_price: Decimal
     unit: str
     image_url: Optional[str]
     is_available: bool

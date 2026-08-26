@@ -13,14 +13,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
-from app.deps import get_current_admin
-from app.models import Admin, Addon, Category, Order, OrderItem, Product, StoreSettings
+from app.deps import get_current_admin, verify_admin_csrf
+from app.models import Admin, Addon, Category, Order, OrderItem, Product, RestaurantSettings
 from app.schemas import OrderStatus
+from app.security import csrf_field
 from app.utils import make_slug, save_image
 
-router = APIRouter(prefix="/admin", dependencies=[Depends(get_current_admin)])
-templates = Jinja2Templates(directory="app/templates")
-UPLOADS_DIR = Path("app/uploads")
+router = APIRouter(prefix="/admin", dependencies=[Depends(get_current_admin), Depends(verify_admin_csrf)])
+TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+templates.env.globals["csrf_field"] = csrf_field
+UPLOADS_DIR = Path(__file__).resolve().parents[1] / "uploads"
 STATUS_LABELS = {
     OrderStatus.pending.value: "قيد الانتظار",
     OrderStatus.preparing.value: "جاري التجهيز",
@@ -48,10 +51,10 @@ def unique_slug(db: Session, model: Union[Type[Category], Type[Product]], value:
         counter += 1
 
 
-def get_or_create_settings(db: Session) -> StoreSettings:
-    settings = db.scalar(select(StoreSettings))
+def get_or_create_settings(db: Session) -> RestaurantSettings:
+    settings = db.scalar(select(RestaurantSettings))
     if settings is None:
-        settings = StoreSettings()
+        settings = RestaurantSettings()
         db.add(settings)
         db.commit()
         db.refresh(settings)
@@ -59,20 +62,18 @@ def get_or_create_settings(db: Session) -> StoreSettings:
 
 
 def get_dashboard_stats(db: Session):
-    orders = db.scalars(select(Order).options(selectinload(Order.items).selectinload(OrderItem.addons)).order_by(Order.created_at.desc())).all()
-
-    product_totals = {}
-    phone_counts = {}
-
-    for order in orders:
-        for item in order.items:
-            if item.product_name:
-                product_totals[item.product_name] = product_totals.get(item.product_name, Decimal("0")) + Decimal(str(item.quantity))
-            if order.customer_phone:
-                phone_counts[order.customer_phone] = phone_counts.get(order.customer_phone, 0) + 1
-
-    top_products = sorted(product_totals.items(), key=lambda item: (-item[1], item[0]))[:5]
-    top_customers = sorted(phone_counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+    top_products = db.execute(
+        select(OrderItem.product_name, func.sum(OrderItem.quantity))
+        .group_by(OrderItem.product_name)
+        .order_by(func.sum(OrderItem.quantity).desc(), OrderItem.product_name)
+        .limit(5)
+    ).all()
+    top_customers = db.execute(
+        select(Order.customer_phone, func.count(Order.id))
+        .group_by(Order.customer_phone)
+        .order_by(func.count(Order.id).desc(), Order.customer_phone)
+        .limit(5)
+    ).all()
     return top_products, top_customers
 
 
@@ -92,7 +93,12 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin: Admin = De
         "month_orders": db.scalar(select(func.count(Order.id)).where(Order.created_at >= month_start)),
         "total_sales": delivered_sales,
         "customers_count": db.scalar(select(func.count(distinct(Order.customer_phone)))),
-        "latest_orders": db.scalars(select(Order).order_by(Order.created_at.desc()).limit(8)).all(),
+        "latest_orders": db.scalars(
+            select(Order)
+            .options(selectinload(Order.items).selectinload(OrderItem.addons))
+            .order_by(Order.created_at.desc())
+            .limit(8)
+        ).all(),
         "top_products": top_products,
         "top_customers": top_customers,
         "status_labels": STATUS_LABELS,
@@ -159,8 +165,8 @@ async def save_product(
     category_id: int = Form(...),
     name: str = Form(...),
     description: Optional[str] = Form(default=None),
-    price: Decimal = Form(...),
-    unit: str = Form(default="kg"),
+    base_price: Decimal = Form(...),
+    unit: str = Form(default="piece"),
     sort_order: int = Form(default=0),
     is_available: bool = Form(default=False),
     is_active: bool = Form(default=False),
@@ -176,7 +182,7 @@ async def save_product(
     product.name = name
     product.slug = unique_slug(db, Product, name, id)
     product.description = description
-    product.price = price
+    product.base_price = base_price
     product.unit = unit
     product.sort_order = sort_order
     product.is_available = is_available
@@ -283,23 +289,29 @@ def settings_page(request: Request, db: Session = Depends(get_db)) -> HTMLRespon
 
 @router.post("/settings")
 async def save_settings(
-    store_name: str = Form(...),
+    restaurant_name: str = Form(...),
     whatsapp_number: str = Form(...),
     phone_number: Optional[str] = Form(default=None),
     address: Optional[str] = Form(default=None),
     working_hours: Optional[str] = Form(default=None),
     currency: str = Form(default="EGP"),
+    facebook_url: Optional[str] = Form(default=None),
+    tiktok_url: Optional[str] = Form(default=None),
+    additional_info: Optional[str] = Form(default=None),
     logo: Optional[UploadFile] = File(default=None),
     banner: Optional[UploadFile] = File(default=None),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     settings = get_or_create_settings(db)
-    settings.store_name = store_name
+    settings.restaurant_name = restaurant_name
     settings.whatsapp_number = whatsapp_number
     settings.phone_number = phone_number
     settings.address = address
     settings.working_hours = working_hours
     settings.currency = currency
+    settings.facebook_url = facebook_url or None
+    settings.tiktok_url = tiktok_url or None
+    settings.additional_info = additional_info or None
     if logo and logo.filename:
         settings.logo_url = await save_image(logo, UPLOADS_DIR / "logos")
     if banner and banner.filename:

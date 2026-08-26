@@ -89,15 +89,15 @@ class Order(Base):
     status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
     total: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     whatsapp_message: Mapped[str] = mapped_column(Text)
-    delivery_option_id: Mapped[Optional[int]] = mapped_column(ForeignKey("delivery_options.id"))
-    coupon_code: Mapped[Optional[str]] = mapped_column(String(50), ForeignKey("coupons.code"))
+    delivery_option_id: Mapped[Optional[int]] = mapped_column(ForeignKey("delivery_options.id", ondelete="SET NULL"))
+    coupon_id: Mapped[Optional[int]] = mapped_column(ForeignKey("coupons.id", ondelete="SET NULL"), index=True)
     pickup_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     items: Mapped[List["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
-    delivery_option: Mapped["DeliveryOption"] = relationship(back_populates="orders")
-    coupon: Mapped["Coupon"] = relationship(back_populates="orders")
+    delivery_option: Mapped[Optional["DeliveryOption"]] = relationship(back_populates="orders")
+    coupon: Mapped[Optional["Coupon"]] = relationship(back_populates="orders")
 
 
 class OrderItem(Base):
@@ -108,7 +108,7 @@ class OrderItem(Base):
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="RESTRICT"))
     product_name: Mapped[str] = mapped_column(String(160))
     unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
-    quantity: Mapped[Decimal] = mapped_column(Numeric(10, 3))
+    quantity: Mapped[int] = mapped_column(Integer)
     line_total: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -122,12 +122,12 @@ class OrderItemAddon(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     order_item_id: Mapped[int] = mapped_column(ForeignKey("order_items.id", ondelete="CASCADE"), index=True)
-    addon_id: Mapped[int] = mapped_column(ForeignKey("addons.id"), index=True)
+    addon_id: Mapped[Optional[int]] = mapped_column(ForeignKey("addons.id", ondelete="SET NULL"), index=True)
     name: Mapped[str] = mapped_column(String(120))
     price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
 
     order_item: Mapped[OrderItem] = relationship(back_populates="addons")
-    addon: Mapped["Addon"] = relationship(back_populates="order_item_addons")
+    addon: Mapped[Optional["Addon"]] = relationship(back_populates="order_item_addons")
 
 
 class RestaurantSettings(Base):
@@ -181,6 +181,8 @@ class Coupon(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    orders: Mapped[List["Order"]] = relationship(back_populates="coupon")
+
 
 class DeliveryOption(Base):
     __tablename__ = "delivery_options"
@@ -195,18 +197,5 @@ class DeliveryOption(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    orders: Mapped[List["Order"]] = relationship(back_populates="delivery_option")
 
-class StoreSettings(Base):
-    __tablename__ = "store_settings"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    store_name: Mapped[str] = mapped_column(String(160), default="Fresh Store")
-    whatsapp_number: Mapped[str] = mapped_column(String(30), default="201000000000")
-    phone_number: Mapped[Optional[str]] = mapped_column(String(30))
-    address: Mapped[Optional[str]] = mapped_column(String(300))
-    logo_url: Mapped[Optional[str]] = mapped_column(String(500))
-    banner_url: Mapped[Optional[str]] = mapped_column(String(500))
-    working_hours: Mapped[Optional[str]] = mapped_column(String(250))
-    currency: Mapped[str] = mapped_column(String(10), default="EGP")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

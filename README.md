@@ -1,13 +1,18 @@
-# Fresh Store MVP
+# Restaurant Ordering System
 
-FastAPI application for a small fruit, vegetable, poultry, or grocery shop.
+نظام طلب إلكتروني لمطعم مبني بـ FastAPI. يعرض قائمة المنتجات مع الإضافات
+(Addons)، ويسمح للزبون بتكوين سلة وإرسال الطلب عبر واتساب، مع لوحة إدارة
+ كاملة لإدارة الأقسام والمنتجات والإضافات والطلبات والإعدادات.
 
-## Requirements
+هذا المشروع كان في الأصل نظامًا لمحل فاكهة (Fruit Store) ثم تم تحويله
+تدريجيًا إلى نظام مطعم. راجع `PROJECT_ARCHITECTURE.md` لتفاصيل البنية.
 
-- Python 3.13 (see `.python-version`)
-- PostgreSQL 14+ (developed against PostgreSQL 17)
+## المتطلبات
 
-## Setup
+- Python 3.13 (انظر `.python-version`)
+- PostgreSQL 14+ (طُوّر على PostgreSQL 17)
+
+## الإعداد
 
 ```bash
 python -m venv .venv
@@ -19,25 +24,31 @@ python -m app.seed_admin
 uvicorn app.main:app --reload
 ```
 
-`.env` holds local secrets and is never committed to Git. On a server
-(Render, VPS, ...), set the same values as real environment variables —
-`DATABASE_URL` from the environment always overrides `.env`.
+ملف `.env` يحتوي على الأسرار المحلية ولا يُرفع إلى Git أبدًا. على الخادم
+(Render أو VPS) اضبط نفس القيم كمتغيرات بيئة حقيقية —
+`DATABASE_URL` من البيئة يتجاوز دائمًا ما في `.env`.
 
-## Admin panel
+## لوحة الإدارة
 
 ```text
 http://127.0.0.1:8000/admin/login
 ```
 
-## Public store
+بيانات الدخول الافتراضية تأتي من `ADMIN_USERNAME` و`ADMIN_PASSWORD` في `.env`.
+
+## واجهة الزبون
 
 ```text
 http://127.0.0.1:8000/
 ```
 
-## Database migrations
+## تهجير قاعدة البيانات (Migrations)
 
 ```bash
-alembic upgrade head      # apply all migrations
+alembic upgrade head      # تطبيق كل التهجير
 alembic revision --autogenerate -m "description"
 ```
+
+> تاريخ التهجير أعيد تأسيسه عند `852de6ed0909` ثم أُضيفت
+> `c7d9f2a41b36` لمواءمة نظام المطعم. أي قاعدة بيانات قديمة مختومة
+> بـ revisions المحذوفة (مثل `0003_quantity_numeric`) تحتاج إعادة تهيئة.
