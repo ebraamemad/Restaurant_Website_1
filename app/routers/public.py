@@ -22,11 +22,12 @@ from app.models import (
 )
 from app.ordering import compute_pricing, validate_scheduled_time
 from app.schemas import AddonOut, OrderCreate, OrderCreated, OrderStatus, ProductDetailOut
-from app.utils import build_search_variants, build_whatsapp_message, build_whatsapp_url
+from app.utils import build_search_variants, build_whatsapp_message, build_whatsapp_url, parse_theme_colors
 
 router = APIRouter()
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+templates.env.globals["theme_colors"] = parse_theme_colors
 
 
 def get_settings(db: Session) -> RestaurantSettings:

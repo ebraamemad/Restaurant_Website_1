@@ -1,0 +1,118 @@
+{% set ns = namespace(featured=[]) %}
+{% for category in categories %}
+    {% if category.is_featured %}
+        {% for product in category.products %}
+            {% if product.is_active and product.is_available %}
+                {% set ns.featured = ns.featured + [product] %}
+            {% endif %}
+        {% endfor %}
+    {% endif %}
+{% endfor %}
+{% if not ns.featured %}
+    {% for product in products if product.is_active and product.is_available and product.image_url %}
+        {% set ns.featured = ns.featured + [product] %}
+    {% endfor %}
+{% endif %}
+{% if not ns.featured %}
+    {% for product in products if product.is_active and product.is_available %}
+        {% set ns.featured = ns.featured + [product] %}
+    {% endfor %}
+{% endif %}
+
+{% if ns.featured %}
+<section class="mb-5 sm:mb-8" x-data="{
+    next() { this.$refs.track.scrollBy({ left: -this.$refs.track.clientWidth * 0.85, behavior: 'smooth' }); },
+    prev() { this.$refs.track.scrollBy({ left: this.$refs.track.clientWidth * 0.85, behavior: 'smooth' }); }
+}">
+
+    <div class="mb-3 flex items-center justify-between sm:mb-4">
+
+        <h2 class="flex items-center gap-2 text-xl font-extrabold sm:text-2xl">
+            ⭐ الأهم عندنا
+        </h2>
+
+        <div class="flex gap-2">
+
+            <button
+                type="button"
+                @click="prev()"
+                aria-label="السابق"
+                class="flex h-9 w-9 items-center justify-center rounded-full bg-white text-lg text-slate-600 shadow-sm ring-1 ring-slate-200/70 transition hover:bg-slate-100 active:scale-95">
+
+                ›
+
+            </button>
+
+            <button
+                type="button"
+                @click="next()"
+                aria-label="التالي"
+                class="flex h-9 w-9 items-center justify-center rounded-full bg-white text-lg text-slate-600 shadow-sm ring-1 ring-slate-200/70 transition hover:bg-slate-100 active:scale-95">
+
+                ‹
+
+            </button>
+
+        </div>
+
+    </div>
+
+    <div
+        x-ref="track"
+        class="chip-scroll -mx-3 flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth px-3 pb-2 sm:gap-4">
+
+        {% for product in ns.featured[:10] %}
+
+        <a
+            href="/products/{{ product.slug }}"
+            class="card group flex w-40 shrink-0 snap-start flex-col overflow-hidden transition duration-300 hover:-translate-y-1 hover:shadow-xl sm:w-52">
+
+            {% if product.image_url %}
+
+            <img
+                src="{{ product.image_url }}"
+                alt="{{ product.name }}"
+                class="h-28 w-full object-cover transition duration-300 group-hover:scale-[1.03] sm:h-36"
+                loading="lazy"
+                decoding="async">
+
+            {% else %}
+
+            <div class="flex h-28 w-full items-center justify-center bg-slate-100 text-4xl sm:h-36" aria-hidden="true">
+
+                🍽
+
+            </div>
+
+            {% endif %}
+
+            <div class="flex flex-1 flex-col justify-between gap-2 p-3">
+
+                <h3 class="line-clamp-2 text-sm font-bold leading-5 group-hover:text-primary sm:text-base">
+
+                    {{ product.name }}
+
+                </h3>
+
+                <div class="flex items-center justify-between">
+
+                    <span class="text-base font-extrabold text-primary sm:text-lg">
+
+                        {{ product.base_price }} <span class="text-[11px] font-semibold text-slate-500">{{ settings.currency }}</span>
+
+                    </span>
+
+                    <span class="text-lg text-primary transition duration-200 group-hover:-translate-x-1" aria-hidden="true">←</span>
+
+                </div>
+
+            </div>
+
+        </a>
+
+        {% endfor %}
+
+    </div>
+
+</section>
+{% endif %}

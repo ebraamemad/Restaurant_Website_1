@@ -43,6 +43,7 @@ class SettingsForm(BaseModel):
     currency: str = Field(default="EGP", min_length=1, max_length=10)
     facebook_url: Optional[str] = Field(default=None, max_length=500)
     tiktok_url: Optional[str] = Field(default=None, max_length=500)
+    description: Optional[str] = Field(default=None, max_length=2000)
     additional_info: Optional[str] = Field(default=None, max_length=2000)
 
 

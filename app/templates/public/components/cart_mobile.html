@@ -32,9 +32,11 @@
             <template
                 x-if="items.length === 0">
 
-                <p class="py-10 text-center text-slate-400">
-                    السلة فارغة
-                </p>
+                <div class="py-10 text-center text-slate-400">
+                    <div class="mb-2 text-4xl" aria-hidden="true">🛒</div>
+                    <p class="font-semibold">السلة فارغة</p>
+                    <p class="mt-1 text-xs">أضف منتجات من المنيو لتبدأ طلبك</p>
+                </div>
 
             </template>
 

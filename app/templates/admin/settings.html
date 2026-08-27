@@ -1,19 +1,51 @@
 {% extends "admin/base.html" %}
 {% block content %}
+{% set theme = theme_colors(settings) %}
 <h1 class="mb-5 text-2xl font-bold">إعدادات المطعم</h1>
 <form method="post" enctype="multipart/form-data" class="grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-2">
   {{ csrf_field(request) }}
+
+  <h2 class="text-lg font-bold md:col-span-2">بيانات المطعم</h2>
   <input name="restaurant_name" value="{{ settings.restaurant_name }}" required class="rounded border px-3 py-2" placeholder="اسم المطعم">
   <input name="whatsapp_number" value="{{ settings.whatsapp_number }}" required class="rounded border px-3 py-2" placeholder="رقم واتساب">
   <input name="phone_number" value="{{ settings.phone_number or '' }}" class="rounded border px-3 py-2" placeholder="رقم الهاتف">
   <input name="currency" value="{{ settings.currency }}" class="rounded border px-3 py-2" placeholder="العملة">
   <input name="address" value="{{ settings.address or '' }}" class="rounded border px-3 py-2 md:col-span-2" placeholder="العنوان">
   <input name="working_hours" value="{{ settings.working_hours or '' }}" class="rounded border px-3 py-2 md:col-span-2" placeholder="مواعيد العمل">
-  <input name="facebook_url" value="{{ settings.facebook_url or '' }}" class="rounded border px-3 py-2" placeholder="رابط فيسبوك">
-  <input name="tiktok_url" value="{{ settings.tiktok_url or '' }}" class="rounded border px-3 py-2" placeholder="رابط تيك توك">
-  <textarea name="additional_info" rows="3" class="rounded border px-3 py-2 md:col-span-2" placeholder="معلومات إضافية تظهر أسفل الصفحة">{{ settings.additional_info or "" }}</textarea>
-  <label class="text-sm font-semibold">اللوجو<input name="logo" type="file" accept="image/*" class="mt-1 w-full rounded border px-3 py-2"></label>
-  <label class="text-sm font-semibold">البنر<input name="banner" type="file" accept="image/*" class="mt-1 w-full rounded border px-3 py-2"></label>
+  <textarea name="description" rows="2" class="rounded border px-3 py-2 md:col-span-2" placeholder="وصف المطعم — يظهر في أعلى الموقع وأسفله">{{ settings.description or "" }}</textarea>
+  <input name="facebook_url" value="{{ settings.facebook_url or '' }}" class="rounded border px-3 py-2" placeholder="رابط فيسبوك (اختياري)">
+  <input name="tiktok_url" value="{{ settings.tiktok_url or '' }}" class="rounded border px-3 py-2" placeholder="رابط تيك توك (اختياري)">
+
+  <h2 class="mt-2 text-lg font-bold md:col-span-2">ألوان واجهة العميل</h2>
+  <p class="text-sm text-slate-500 md:col-span-2">تغيير الألوان يطبّق فورًا على موقع العملاء بدون تعديل كود.</p>
+  <label class="text-sm font-semibold">اللون الأساسي
+    <input name="primary_color" type="color" value="{{ theme.primary }}" class="mt-1 h-11 w-full cursor-pointer rounded border px-2 py-1">
+  </label>
+  <label class="text-sm font-semibold">اللون الثانوي
+    <input name="secondary_color" type="color" value="{{ theme.secondary }}" class="mt-1 h-11 w-full cursor-pointer rounded border px-2 py-1">
+  </label>
+  <label class="text-sm font-semibold">لون التمييز
+    <input name="accent_color" type="color" value="{{ theme.accent }}" class="mt-1 h-11 w-full cursor-pointer rounded border px-2 py-1">
+  </label>
+  <div class="flex items-end gap-1.5 pb-1">
+    <span class="h-9 w-9 rounded-lg border" style="background:{{ theme.primary }}" title="الأساسي"></span>
+    <span class="h-9 w-9 rounded-lg border" style="background:{{ theme.secondary }}" title="الثانوي"></span>
+    <span class="h-9 w-9 rounded-lg border" style="background:{{ theme.accent }}" title="التمييز"></span>
+  </div>
+
+  <h2 class="mt-2 text-lg font-bold md:col-span-2">الصور</h2>
+  <label class="text-sm font-semibold">اللوجو
+    <input name="logo" type="file" accept="image/*" class="mt-1 w-full rounded border px-3 py-2">
+    {% if settings.logo_url %}<img src="{{ settings.logo_url }}" class="mt-2 h-16 w-16 rounded-full border object-cover" alt="اللوجو الحالي">{% endif %}
+  </label>
+  <label class="text-sm font-semibold">البنر
+    <input name="banner" type="file" accept="image/*" class="mt-1 w-full rounded border px-3 py-2">
+    {% if settings.banner_url %}<img src="{{ settings.banner_url }}" class="mt-2 h-16 w-40 rounded-lg border object-cover" alt="البنر الحالي">{% endif %}
+  </label>
+
+  <h2 class="mt-2 text-lg font-bold md:col-span-2">معلومات أسفل الموقع (Footer)</h2>
+  <textarea name="additional_info" rows="3" class="rounded border px-3 py-2 md:col-span-2" placeholder="نص معلومات عن المطعم يظهر أسفل الموقع">{{ settings.additional_info or "" }}</textarea>
+
   <button class="rounded bg-slate-900 px-4 py-2 font-bold text-white md:col-span-2">حفظ الإعدادات</button>
 </form>
 {% endblock %}

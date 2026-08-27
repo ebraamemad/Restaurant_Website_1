@@ -168,6 +168,7 @@ class RestaurantSettings(Base):
     currency: Mapped[str] = mapped_column(String(10), default="EGP")
     facebook_url: Mapped[Optional[str]] = mapped_column(String(500))
     tiktok_url: Mapped[Optional[str]] = mapped_column(String(500))
+    description: Mapped[Optional[str]] = mapped_column(Text)  # وصف المطعم — يظهر في Hero والـFooter
     theme_colors: Mapped[Optional[str]] = mapped_column(String(500))  # JSON string for theme colors
     additional_info: Mapped[Optional[str]] = mapped_column(Text)  # Additional info displayed at bottom
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

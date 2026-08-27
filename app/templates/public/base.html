@@ -9,7 +9,8 @@
 name="viewport"
 content="width=device-width, initial-scale=1.0">
 
-<meta name="theme-color" content="#059669">
+{% set theme = theme_colors(settings) %}
+<meta name="theme-color" content="{{ theme.primary }}">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="mobile-web-app-capable" content="yes">
@@ -51,9 +52,11 @@ cairo:["Cairo","sans-serif"]
 
 colors:{
 
-primary:"#059669",
+primary:"{{ theme.primary }}",
 
-secondary:"#047857",
+secondary:"{{ theme.secondary }}",
+
+accent:"{{ theme.accent }}",
 
 light:"#f8fafc"
 
@@ -79,9 +82,18 @@ src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <link rel="stylesheet"
 href="/static/css/app.css">
 
+<style>
+:root{
+--color-primary:{{ theme.primary }};
+--color-secondary:{{ theme.secondary }};
+--color-accent:{{ theme.accent }};
+}
+</style>
+
 </head>
 
-<body class="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(5,150,105,0.12),_transparent_45%),linear-gradient(135deg,_#f8fafc_0%,_#f1f5f9_100%)] font-cairo text-slate-800 antialiased selection:bg-primary selection:text-white">
+<body class="min-h-screen font-cairo text-slate-800 antialiased selection:bg-primary selection:text-white"
+style="background: radial-gradient(circle at top, color-mix(in srgb, {{ theme.primary }} 12%, transparent), transparent 45%), linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)">
 
 {% block content %}
 

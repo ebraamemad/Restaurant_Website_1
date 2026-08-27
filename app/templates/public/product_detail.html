@@ -8,12 +8,12 @@
       ← العودة للقائمة
     </a>
 
-    <div class="grid gap-6 rounded-2xl bg-white p-4 shadow-sm sm:p-6 lg:grid-cols-[200px_1fr]">
+    <div class="grid gap-6 rounded-2xl bg-white p-4 shadow-sm sm:p-6 lg:grid-cols-[240px_1fr]">
 
       {% if product.image_url %}
-        <img src="{{ product.image_url }}" alt="{{ product.name }}" class="rounded-lg object-cover" width="200" height="200">
+        <img src="{{ product.image_url }}" alt="{{ product.name }}" class="w-full rounded-xl object-cover lg:h-60" width="240" height="240" loading="eager" decoding="async">
       {% else %}
-        <div class="flex h-48 w-full items-center justify-center rounded-lg bg-slate-200 text-5xl font-semibold text-slate-500">🍽</div>
+        <div class="flex h-48 w-full items-center justify-center rounded-xl bg-slate-200 text-5xl font-semibold text-slate-500" aria-hidden="true">🍽</div>
       {% endif %}
 
       <div>
@@ -46,10 +46,10 @@
             <label class="flex cursor-pointer items-center justify-between rounded-lg border border-slate-200 p-3 transition hover:border-primary">
               <div class="flex items-center gap-2">
                 <template x-if="group.allow_multiple">
-                  <input type="checkbox" :value="option.id" :checked="isPicked(group, option)" @change="togglePick(group, option)" class="h-4 w-4 accent-[#059669]">
+                  <input type="checkbox" :value="option.id" :checked="isPicked(group, option)" @change="togglePick(group, option)" class="h-4 w-4 accent-primary">
                 </template>
                 <template x-if="!group.allow_multiple">
-                  <input type="radio" :name="'option-group-' + group.id" :value="option.id" :checked="isPicked(group, option)" @change="pickOne(group, option)" class="h-4 w-4 accent-[#059669]">
+                  <input type="radio" :name="'option-group-' + group.id" :value="option.id" :checked="isPicked(group, option)" @change="pickOne(group, option)" class="h-4 w-4 accent-primary">
                 </template>
                 <span x-text="option.name"></span>
               </div>
@@ -67,7 +67,7 @@
         <template x-for="addon in addons" :key="addon.id">
           <label class="flex cursor-pointer items-center justify-between rounded-lg border border-slate-200 p-3 transition hover:border-primary">
             <div class="flex items-center gap-2">
-              <input type="checkbox" :value="addon.id" x-model.number="selectedAddons" class="h-4 w-4 accent-[#059669]">
+              <input type="checkbox" :value="addon.id" x-model.number="selectedAddons" class="h-4 w-4 accent-primary">
               <span x-text="addon.name"></span>
             </div>
             <span class="text-sm font-semibold text-primary">+ <span x-text="formatPrice(addon.price)"></span></span>
@@ -106,6 +106,8 @@
 
   </section>
 </main>
+
+{% include "public/components/footer.html" %}
 
 <script src="/static/js/cart.js"></script>
 

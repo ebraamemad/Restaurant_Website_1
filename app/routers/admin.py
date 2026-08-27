@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -8,7 +9,7 @@ from typing import Optional, Type, Union
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import distinct, func, select
+from sqlalchemy import distinct, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -29,12 +30,20 @@ from app.models import (
 )
 from app.schemas import OrderStatus
 from app.security import csrf_field
-from app.utils import make_slug, save_image
+from app.utils import (
+    THEME_DEFAULTS,
+    build_search_variants,
+    make_slug,
+    normalize_hex_color,
+    parse_theme_colors,
+    save_image,
+)
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(get_current_admin), Depends(verify_admin_csrf)])
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.globals["csrf_field"] = csrf_field
+templates.env.globals["theme_colors"] = parse_theme_colors
 UPLOADS_DIR = Path(__file__).resolve().parents[1] / "uploads"
 STATUS_LABELS = {
     OrderStatus.pending.value: "قيد الانتظار",
@@ -170,10 +179,21 @@ def delete_category(category_id: int, db: Session = Depends(get_db)) -> Redirect
 
 
 @router.get("/products", response_class=HTMLResponse)
-def products_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+def products_page(request: Request, q: Optional[str] = None, db: Session = Depends(get_db)) -> HTMLResponse:
     categories = db.scalars(select(Category).order_by(Category.sort_order, Category.name)).all()
-    products = db.scalars(select(Product).options(selectinload(Product.category)).order_by(Product.sort_order, Product.name)).all()
-    return templates.TemplateResponse("admin/products.html", {"request": request, "categories": categories, "products": products})
+    statement = select(Product).options(selectinload(Product.category))
+    query = (q or "").strip()
+    if query:
+        terms = build_search_variants(query)
+        if terms:
+            statement = statement.where(or_(*[Product.name.ilike(f"%{term}%") for term in terms]))
+        else:
+            statement = statement.where(Product.name.ilike(f"%{query}%"))
+    products = db.scalars(statement.order_by(Product.sort_order, Product.name)).all()
+    return templates.TemplateResponse(
+        "admin/products.html",
+        {"request": request, "categories": categories, "products": products, "q": query},
+    )
 
 
 @router.post("/products")
@@ -567,11 +587,29 @@ async def save_settings(
     currency: str = Form(default="EGP"),
     facebook_url: Optional[str] = Form(default=None),
     tiktok_url: Optional[str] = Form(default=None),
+    description: Optional[str] = Form(default=None),
     additional_info: Optional[str] = Form(default=None),
+    primary_color: Optional[str] = Form(default=None),
+    secondary_color: Optional[str] = Form(default=None),
+    accent_color: Optional[str] = Form(default=None),
     logo: Optional[UploadFile] = File(default=None),
     banner: Optional[UploadFile] = File(default=None),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
+    theme = dict(THEME_DEFAULTS)
+    submitted = {
+        "primary": primary_color,
+        "secondary": secondary_color,
+        "accent": accent_color,
+    }
+    for key, raw_value in submitted.items():
+        if raw_value is None or not str(raw_value).strip():
+            continue
+        normalized = normalize_hex_color(raw_value)
+        if normalized is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Invalid {key} color — expected hex like #059669")
+        theme[key] = normalized
+
     settings = get_or_create_settings(db)
     settings.restaurant_name = restaurant_name
     settings.whatsapp_number = whatsapp_number
@@ -581,7 +619,9 @@ async def save_settings(
     settings.currency = currency
     settings.facebook_url = facebook_url or None
     settings.tiktok_url = tiktok_url or None
+    settings.description = description or None
     settings.additional_info = additional_info or None
+    settings.theme_colors = json.dumps(theme)
     if logo and logo.filename:
         settings.logo_url = await save_image(logo, UPLOADS_DIR / "logos")
     if banner and banner.filename:

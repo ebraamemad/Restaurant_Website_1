@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -55,6 +56,41 @@ def build_search_variants(value: str) -> List[str]:
         variants.add(cleaned.replace("ى", "ي"))
 
     return [variant for variant in variants if variant]
+
+
+THEME_DEFAULTS: Dict[str, str] = {
+    "primary": "#059669",
+    "secondary": "#047857",
+    "accent": "#f59e0b",
+}
+HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+
+def normalize_hex_color(value: Optional[str]) -> Optional[str]:
+    """يقبل #rgb أو #rrggbb ويعيدها بصيغة #rrggbb صغيرة، أو None لو غير صالحة."""
+    color = (value or "").strip().lower()
+    if not HEX_COLOR_RE.match(color):
+        return None
+    if len(color) == 4:
+        color = "#" + "".join(ch * 2 for ch in color[1:])
+    return color
+
+
+def parse_theme_colors(settings: Optional[RestaurantSettings]) -> Dict[str, str]:
+    """ألوان واجهة العميل من settings.theme_colors مع الوقوع على الافتراضي."""
+    colors = dict(THEME_DEFAULTS)
+    raw = (getattr(settings, "theme_colors", None) or "").strip() if settings is not None else ""
+    if raw:
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            data = None
+        if isinstance(data, dict):
+            for key in THEME_DEFAULTS:
+                normalized = normalize_hex_color(data.get(key))
+                if normalized is not None:
+                    colors[key] = normalized
+    return colors
 
 
 async def save_image(upload: UploadFile, folder: Path) -> str:

@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -703,6 +704,66 @@ if new_option is not None:
     r = admin_post(f"/admin/delivery-options/{option_id}/delete", {})
     check("حذف طريقة الاستلام -> 303", r.status_code == 303, str(r.status_code))
     check("الطريقة اتحذفت فعلًا", TestingSessionLocal().scalar(select(DeliveryOption).where(DeliveryOption.id == option_id)) is None)
+
+# ====== 14) Settings: description + theme + footer + products search ======
+print("== Settings theme & footer ==")
+r = client.get("/admin/settings")
+check("صفحة الإعدادات -> 200", r.status_code == 200, str(r.status_code))
+check("فيها منتقيات الألوان الثلاثة", r.text.count('type="color"') == 3)
+
+r = admin_post(
+    "/admin/settings",
+    {
+        "restaurant_name": "مطعم الاختبار",
+        "whatsapp_number": "201000000000",
+        "phone_number": "01000000000",
+        "address": "عنوان تجريبي",
+        "working_hours": "10 ص - 12 م",
+        "currency": "EGP",
+        "facebook_url": "https://facebook.com/test",
+        "tiktok_url": "",
+        "description": "مطعم رائع على النيل",
+        "additional_info": "التوصيل متاح لجميع مناطق القاهرة",
+        "primary_color": "#1d4ed8",
+        "secondary_color": "#1e40af",
+        "accent_color": "#fbbf24",
+    },
+)
+check("حفظ الإعدادات بالألوان والوصف -> 303", r.status_code == 303, str(r.status_code))
+db = TestingSessionLocal()
+st = db.scalar(select(RestaurantSettings))
+check("الوصف اتحفظ", st.description == "مطعم رائع على النيل", str(st.description))
+theme_data = json.loads(st.theme_colors)
+check(
+    "ألوان الـtheme اتحفطت JSON",
+    theme_data == {"primary": "#1d4ed8", "secondary": "#1e40af", "accent": "#fbbf24"},
+    st.theme_colors,
+)
+
+r = admin_post(
+    "/admin/settings",
+    {"restaurant_name": "مطعم الاختبار", "whatsapp_number": "201000000000", "primary_color": "notacolor"},
+)
+check("لون غير صالح -> 400", r.status_code == 400, str(r.status_code))
+
+r = client.get("/")
+check("الصفحة الرئيسية -> 200", r.status_code == 200, str(r.status_code))
+check("الرئيسية فيها اعتماد Triples", "Triples" in r.text)
+check("الرئيسية فيها زر واتساب 01550253834", "wa.me/201550253834" in r.text)
+check("الرئيسية فيها نص الـfooter", "التوصيل متاح لجميع مناطق القاهرة" in r.text)
+check("الرئيسية فيها الوصف", "مطعم رائع على النيل" in r.text)
+check("الرئيسية فيها اللون الأساسي الجديد", "#1d4ed8" in r.text)
+check("الرئيسية فيها لون التمييز", "#fbbf24" in r.text)
+r = client.get("/products/pizza-margherita-test")
+check("صفحة التفاصيل فيها الـfooter", r.status_code == 200 and "Triples" in r.text)
+
+print("== Admin products search ==")
+r = client.get("/admin/products?q=مارجريتا")
+check("بحث منتجات -> 200", r.status_code == 200, str(r.status_code))
+check("نتيجة البحث فيها المنتج المطلوب", "بيتزا مارجريتا" in r.text)
+check("نتيجة البحث مافيهاش منتجات تانية", "كريب بانية" not in r.text)
+r = client.get("/admin/products?q=zzzz-not-found")
+check("بحث بدون نتائج -> 200 بدون بطاقات منتجات", r.status_code == 200 and 'name="id"' not in r.text)
 
 # ====== Rollback ======
 outer_transaction.rollback()

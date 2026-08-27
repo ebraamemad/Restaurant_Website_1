@@ -6,9 +6,26 @@
 
         <a
             href="#cat-{{ category.id }}"
-            class="chip-scroll shrink-0 whitespace-nowrap rounded-full bg-white px-3 py-2 text-sm font-semibold shadow-sm transition duration-200 hover:-translate-y-0.5 hover:bg-primary hover:text-white active:scale-[0.98] sm:px-5 sm:text-base">
+            class="chip-scroll flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm ring-1 ring-slate-200/70 transition duration-200 hover:-translate-y-0.5 hover:bg-primary hover:text-white hover:ring-primary active:scale-[0.98] sm:px-4 sm:py-2.5 sm:text-base">
+
+            {% if category.image_url %}
+
+            <img
+                src="{{ category.image_url }}"
+                alt=""
+                class="h-6 w-6 rounded-full object-cover sm:h-7 sm:w-7"
+                loading="lazy"
+                decoding="async">
+
+            {% else %}
+
+            <span class="text-base sm:text-lg" aria-hidden="true">🍽</span>
+
+            {% endif %}
 
             {{ category.name }}
+
+            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500">{{ category.products | length }}</span>
 
         </a>
 
