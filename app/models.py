@@ -90,6 +90,9 @@ class Order(Base):
     customer_address: Mapped[str] = mapped_column(String(350))
     notes: Mapped[Optional[str]] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))  # إجمالي المنتجات قبل الخصم والرسوم
+    delivery_fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))  # رسوم التوصيل المحفوظة وقت الطلب
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))  # خصم الكوبون المحفوظ وقت الطلب
     total: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     whatsapp_message: Mapped[str] = mapped_column(Text)
     delivery_option_id: Mapped[Optional[int]] = mapped_column(ForeignKey("delivery_options.id", ondelete="SET NULL"))
@@ -245,6 +248,7 @@ class DeliveryOption(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     estimated_time: Mapped[Optional[str]] = mapped_column(String(50))  # مثال: "30-45 دقيقة"
+    is_pickup: Mapped[bool] = mapped_column(Boolean, default=False)  # True = استلام من المطعم (بدون عنوان/رسوم)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

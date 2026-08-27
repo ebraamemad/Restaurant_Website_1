@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from decimal import Decimal
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
@@ -153,21 +152,30 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
         coupon_code=payload.coupon_code,
     )
 
-    # 3) بناء الطلب مع حفظ لقطة الأسعار وقت الإنشاء.
+    # 3) العنوان مطلوب للتوصيل فقط — الاستلام من المطعم لا يحتاج عنوان.
+    address = (payload.customer_address or "").strip() or None
+    delivery_option = pricing.delivery_option
+    if delivery_option is not None and not delivery_option.is_pickup and not address:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "العنوان مطلوب لطلبات التوصيل")
+
+    # 4) بناء الطلب مع حفظ لقطة الأسعار والتفصيلة الكاملة وقت الإنشاء.
     order = Order(
         customer_name=payload.customer_name,
         customer_phone=payload.customer_phone,
-        customer_address=payload.customer_address or "",
+        customer_address=address or "",
         notes=payload.notes,
         status=OrderStatus.pending.value,
+        subtotal=pricing.subtotal,
+        delivery_fee=pricing.delivery_fee,
+        discount_amount=pricing.discount_amount,
         total=pricing.total,
         whatsapp_message="",
-        delivery_option_id=pricing.delivery_option.id if pricing.delivery_option else None,
+        delivery_option_id=delivery_option.id if delivery_option else None,
         coupon_id=pricing.coupon.id if pricing.coupon else None,
         pickup_time=scheduled_time,
     )
 
-    message_items: List[Tuple[str, int, Decimal, Optional[str]]] = []
+    message_items: List[dict] = []
     for line in pricing.lines:
         order_item = OrderItem(
             product_id=line.product.id,
@@ -192,22 +200,39 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
             )
         order.items.append(order_item)
 
-        addon_suffix = ""
-        if line.addons:
-            addon_suffix = " + " + ", ".join(a.name for a in line.addons)
-        message_items.append((line.display_name + addon_suffix, line.quantity, line.line_total, line.item_note))
+        message_items.append(
+            {
+                "name": line.product.name,
+                "quantity": line.quantity,
+                "line_total": line.line_total,
+                "options": [(o.name, o.price_adjustment) for o in line.options],
+                "addons": [(a.name, a.price) for a in line.addons],
+                "note": line.item_note,
+            }
+        )
+
+    # 5) خصم استخدام الكوبون بعد نجاح الحساب.
+    if pricing.coupon is not None:
+        pricing.coupon.usage_count += 1
+        db.add(pricing.coupon)
+
+    # 6) حفظ الطلب أولًا لمعرفة رقمه، ثم بناء رسالة WhatsApp برقم الطلب.
+    db.add(order)
+    db.flush()
 
     restaurant_settings = get_settings(db)
     message = build_whatsapp_message(
         restaurant_settings,
+        order.id,
         payload.customer_name,
         payload.customer_phone,
-        payload.customer_address,
+        address,
         message_items,
         subtotal=pricing.subtotal,
         discount_amount=pricing.discount_amount,
         delivery_fee=pricing.delivery_fee,
-        delivery_name=pricing.delivery_option.name if pricing.delivery_option else None,
+        delivery_name=delivery_option.name if delivery_option else None,
+        is_pickup=bool(delivery_option and delivery_option.is_pickup),
         total=pricing.total,
         notes=payload.notes,
         pickup_time=scheduled_time,
@@ -215,20 +240,14 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
     )
     order.whatsapp_message = message
 
-    # 4) خصم استخدام الكوبون بعد نجاح الحساب.
-    if pricing.coupon is not None:
-        pricing.coupon.usage_count += 1
-        db.add(pricing.coupon)
-
-    db.add(order)
     db.commit()
     db.refresh(order)
     return OrderCreated(
         order_id=order.id,
         status=order.status,
-        subtotal=pricing.subtotal,
-        discount_amount=pricing.discount_amount,
-        delivery_fee=pricing.delivery_fee,
+        subtotal=order.subtotal,
+        discount_amount=order.discount_amount,
+        delivery_fee=order.delivery_fee,
         total=order.total,
         currency=restaurant_settings.currency,
         whatsapp_url=build_whatsapp_url(restaurant_settings.whatsapp_number, message),

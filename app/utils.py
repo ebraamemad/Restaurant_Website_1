@@ -5,7 +5,7 @@ import unicodedata
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -75,38 +75,60 @@ async def save_image(upload: UploadFile, folder: Path) -> str:
 
 def build_whatsapp_message(
     settings: RestaurantSettings,
+    order_id: Optional[int],
     customer_name: str,
     customer_phone: str,
     customer_address: Optional[str],
-    items: List[Tuple[str, int, Decimal, Optional[str]]],
+    items: List[dict],
     subtotal: Decimal,
     discount_amount: Decimal,
     delivery_fee: Decimal,
     delivery_name: Optional[str],
+    is_pickup: bool,
     total: Decimal,
     notes: Optional[str],
     pickup_time: Optional[datetime] = None,
     coupon_code: Optional[str] = None,
 ) -> str:
-    lines = [
-        f"طلب جديد من {settings.restaurant_name}",
-        "",
-        f"الاسم: {customer_name}",
-        f"الهاتف: {customer_phone}",
-    ]
+    """يبني رسالة واتساب منظمة. كل عنصر في items هو dict بالحقول:
+    name, quantity, line_total, options [(name, price_adjustment)], addons [(name, price)], note.
+    """
+    lines = [f"طلب جديد من {settings.restaurant_name}"]
+    if order_id is not None:
+        lines.append(f"رقم الطلب: #{order_id}")
+    lines.extend(["", f"الاسم: {customer_name}", f"الهاتف: {customer_phone}"])
     if customer_address:
         lines.append(f"العنوان: {customer_address}")
     if delivery_name:
         lines.append(f"طريقة الاستلام: {delivery_name}")
+    else:
+        lines.append("طريقة الاستلام: " + ("استلام من المطعم" if is_pickup else "توصيل"))
     if pickup_time is not None:
-        lines.append(f"موعد الطلب: {ensure_aware(pickup_time).strftime('%Y-%m-%d %H:%M')}")
+        # العرض بالتوقيت المحلي للمطعم — نفس التوقيت اللي بيرجع من قاعدة البيانات.
+        lines.append(f"موعد الطلب: {ensure_aware(pickup_time).astimezone().strftime('%Y-%m-%d %H:%M')}")
+    else:
+        lines.append("موعد الطلب: في أقرب وقت")
+
     lines.extend(["", "المنتجات:"])
-    for name, quantity, line_total, item_note in items:
-        lines.append(f"- {name} x {quantity} = {money(line_total)}")
-        if item_note:
-            lines.append(f"  ملاحظة: {item_note}")
-    lines.append("")
-    lines.append(f"الإجمالي الفرعي: {money(subtotal)} {settings.currency}")
+    for item in items:
+        lines.append(f"- {item['name']} × {item['quantity']} = {money(item['line_total'])} {settings.currency}")
+        options = item.get("options") or []
+        if options:
+            opts = "، ".join(f"{name} (+{money(adj)})" for name, adj in options)
+            lines.append(f"  الخيارات: {opts}")
+        addons = item.get("addons") or []
+        if addons:
+            adds = "، ".join(f"{name} (+{money(price)})" for name, price in addons)
+            lines.append(f"  الإضافات: {adds}")
+        if item.get("note"):
+            lines.append(f"  ملاحظة: {item['note']}")
+
+    lines.extend(
+        [
+            "",
+            f"الإجمالي الفرعي: {money(subtotal)} {settings.currency}",
+        ]
+    )
     if discount_amount > 0:
         suffix = f" (كوبون: {coupon_code})" if coupon_code else ""
         lines.append(f"الخصم: -{money(discount_amount)} {settings.currency}{suffix}")

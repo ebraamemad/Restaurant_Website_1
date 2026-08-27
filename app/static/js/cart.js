@@ -59,11 +59,115 @@ function storeCart() {
     qtyMap: {}, // كمية مؤقتة لكل كارت منتج على الصفحة الرئيسية
     customer: { name: "", phone: "", address: "", notes: "" },
 
+    // ===== Checkout: طريقة الاستلام + الوقت + الكوبون + معاينة الحساب من الـBackend =====
+    deliveryOptions: [],
+    selectedDeliveryId: null,
+    scheduling: "asap", // "asap" | "scheduled"
+    scheduledTime: "",
+    couponCode: "",
+    couponValid: null,
+    couponMessage: "",
+    preview: { subtotal: 0, discount_amount: 0, delivery_fee: 0, total: 0 },
+    previewLoading: false,
+    _previewSeq: 0,
+
     load() {
       this.items = Cart.read();
+      this.loadCheckout();
     },
     persist() {
       Cart.write(this.items);
+    },
+
+    async loadCheckout() {
+      try {
+        const resp = await fetch("/api/delivery-options");
+        if (resp.ok) {
+          this.deliveryOptions = await resp.json();
+          if (this.deliveryOptions.length && this.selectedDeliveryId === null) {
+            this.selectedDeliveryId = this.deliveryOptions[0].id;
+          }
+        }
+      } catch {}
+      this.refreshPreview();
+    },
+    selectedDeliveryOption() {
+      return (
+        this.deliveryOptions.find((o) => o.id === this.selectedDeliveryId) || null
+      );
+    },
+    isPickup() {
+      const opt = this.selectedDeliveryOption();
+      return !!opt && !!opt.is_pickup;
+    },
+    minScheduledTime() {
+      const d = new Date(Date.now() + 15 * 60000);
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+        d.getHours()
+      )}:${pad(d.getMinutes())}`;
+    },
+    // عناصر السلة بالشكل اللي بيقبله الـBackend
+    mappedItems() {
+      return this.items.map((i) => ({
+        product_id: i.id,
+        quantity: i.quantity,
+        option_ids: (i.optionIds || []).map(Number),
+        addon_ids: (i.addonIds || []).map(Number),
+        item_note: i.item_note || null,
+      }));
+    },
+    // بيطلب من الـBackend يحسب الإجمالي (subtotal/delivery/discount/total) — للعرض قبل التأكيد
+    async refreshPreview() {
+      if (!this.items.length) {
+        this.preview = { subtotal: 0, discount_amount: 0, delivery_fee: 0, total: 0 };
+        this.couponValid = null;
+        this.couponMessage = "";
+        return;
+      }
+      const seq = ++this._previewSeq;
+      this.previewLoading = true;
+      try {
+        const resp = await fetch("/api/orders/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: this.mappedItems(),
+            delivery_option_id: this.selectedDeliveryId,
+            coupon_code: this.couponCode.trim() || null,
+          }),
+        });
+        if (seq !== this._previewSeq) return; // نتيجة قديمة — تجاهل
+        if (resp.ok) {
+          const data = await resp.json();
+          this.preview = {
+            subtotal: Number(data.subtotal || 0),
+            discount_amount: Number(data.discount_amount || 0),
+            delivery_fee: Number(data.delivery_fee || 0),
+            total: Number(data.total || 0),
+          };
+          if (this.couponCode.trim()) {
+            this.couponValid = data.coupon_valid === true;
+            this.couponMessage = data.coupon_message || "";
+          }
+        }
+      } catch {
+      } finally {
+        if (seq === this._previewSeq) this.previewLoading = false;
+      }
+    },
+    applyCoupon() {
+      const code = this.couponCode.trim();
+      if (!code) {
+        this.couponValid = null;
+        this.couponMessage = "";
+        this.refreshPreview();
+        return;
+      }
+      this.refreshPreview();
+    },
+    onCheckoutChange() {
+      this.refreshPreview();
     },
 
     formatPrice(value) {
@@ -90,7 +194,9 @@ function storeCart() {
     count() {
       return this.items.length;
     },
+    // إجمالي محلي احتياطي لو الـpreview لسه مجاش — النهائي دايمًا من الـBackend
     total() {
+      if (this.preview && this.preview.total > 0) return this.preview.total;
       return this.items.reduce((sum, i) => sum + this.lineTotal(i), 0);
     },
 
@@ -131,16 +237,19 @@ function storeCart() {
         });
       }
       this.persist();
+      this.refreshPreview();
     },
 
     // كمية سطر السلة (أرقام صحيحة)
     increaseQty(item) {
       item.quantity = Math.min(999, Number(item.quantity || 1) + 1);
       this.persist();
+      this.refreshPreview();
     },
     decreaseQty(item) {
       item.quantity = Math.max(1, Number(item.quantity || 1) - 1);
       this.persist();
+      this.refreshPreview();
     },
     setQty(item, value) {
       let n = Math.floor(Number(value) || 1);
@@ -148,16 +257,39 @@ function storeCart() {
       if (n > 999) n = 999;
       item.quantity = n;
       this.persist();
+      this.refreshPreview();
     },
     remove(lineId) {
       this.items = this.items.filter((i) => i.lineId !== lineId);
       this.persist();
+      this.refreshPreview();
     },
 
     async submitOrder() {
       if (!this.items.length) return;
-      this.loading = true;
       this.error = "";
+
+      // العنوان مطلوب للتوصيل فقط
+      if (!this.isPickup() && this.customer.address.trim().length < 5) {
+        this.error = "من فضلك أدخل عنوان التوصيل.";
+        return;
+      }
+      // الوقت المحدد لازم يكون في المستقبل
+      let pickupTime = null;
+      if (this.scheduling === "scheduled") {
+        if (!this.scheduledTime) {
+          this.error = "من فضلك اختر وقت الطلب.";
+          return;
+        }
+        const d = new Date(this.scheduledTime);
+        if (isNaN(d.getTime()) || d.getTime() <= Date.now()) {
+          this.error = "وقت الطلب يجب أن يكون في المستقبل.";
+          return;
+        }
+        pickupTime = d.toISOString();
+      }
+
+      this.loading = true;
       try {
         const resp = await fetch("/orders", {
           method: "POST",
@@ -165,15 +297,12 @@ function storeCart() {
           body: JSON.stringify({
             customer_name: this.customer.name,
             customer_phone: this.customer.phone,
-            customer_address: this.customer.address,
+            customer_address: this.isPickup() ? null : this.customer.address.trim(),
             notes: this.customer.notes || null,
-            items: this.items.map((i) => ({
-              product_id: i.id,
-              quantity: i.quantity,
-              option_ids: (i.optionIds || []).map(Number),
-              addon_ids: (i.addonIds || []).map(Number),
-              item_note: i.item_note || null,
-            })),
+            delivery_option_id: this.selectedDeliveryId,
+            coupon_code: this.couponCode.trim() || null,
+            pickup_time: pickupTime,
+            items: this.mappedItems(),
           }),
         });
         if (!resp.ok) {
@@ -188,6 +317,7 @@ function storeCart() {
         const data = await resp.json();
         Cart.clear();
         this.items = [];
+        this.preview = { subtotal: 0, discount_amount: 0, delivery_fee: 0, total: 0 };
         window.location.href = data.whatsapp_url;
       } catch {
         this.error = "تعذّر إرسال الطلب.";

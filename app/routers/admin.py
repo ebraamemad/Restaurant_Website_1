@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional, Type, Union
@@ -18,6 +18,8 @@ from app.models import (
     Admin,
     Addon,
     Category,
+    Coupon,
+    DeliveryOption,
     Order,
     OrderItem,
     Product,
@@ -105,7 +107,12 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin: Admin = De
         "customers_count": db.scalar(select(func.count(distinct(Order.customer_phone)))),
         "latest_orders": db.scalars(
             select(Order)
-            .options(selectinload(Order.items).selectinload(OrderItem.addons))
+            .options(
+                selectinload(Order.items).selectinload(OrderItem.addons),
+                selectinload(Order.items).selectinload(OrderItem.options),
+                selectinload(Order.delivery_option),
+                selectinload(Order.coupon),
+            )
             .order_by(Order.created_at.desc())
             .limit(8)
         ).all(),
@@ -382,7 +389,16 @@ def delete_product_option(product_id: int, option_id: int, db: Session = Depends
 
 @router.get("/orders", response_class=HTMLResponse)
 def orders_page(request: Request, status_filter: Optional[str] = None, db: Session = Depends(get_db)) -> HTMLResponse:
-    statement = select(Order).options(selectinload(Order.items)).order_by(Order.created_at.desc())
+    statement = (
+        select(Order)
+        .options(
+            selectinload(Order.items).selectinload(OrderItem.addons),
+            selectinload(Order.items).selectinload(OrderItem.options),
+            selectinload(Order.delivery_option),
+            selectinload(Order.coupon),
+        )
+        .order_by(Order.created_at.desc())
+    )
     if status_filter:
         statement = statement.where(Order.status == status_filter)
     orders = db.scalars(statement).all()
@@ -400,6 +416,140 @@ def update_order_status(order_id: int, status_value: OrderStatus = Form(...), db
     order.status = status_value.value
     db.commit()
     return redirect("/admin/orders")
+
+
+def _coupon_status(coupon: Coupon, now: datetime) -> str:
+    if not coupon.is_active:
+        return "معطل"
+    if now < coupon.start_date:
+        return "لم يبدأ"
+    if now > coupon.end_date:
+        return "منتهي"
+    if coupon.usage_limit is not None and coupon.usage_count >= coupon.usage_limit:
+        return "مستنفد"
+    return "فعال"
+
+
+@router.get("/coupons", response_class=HTMLResponse)
+def coupons_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    coupons = db.scalars(select(Coupon).order_by(Coupon.created_at.desc())).all()
+    return templates.TemplateResponse(
+        "admin/coupons.html",
+        {"request": request, "coupons": coupons, "now": datetime.now(timezone.utc), "status_of": _coupon_status},
+    )
+
+
+@router.post("/coupons")
+def save_coupon(
+    id: Optional[int] = Form(default=None),
+    code: str = Form(...),
+    discount_type: str = Form(...),
+    discount_value: Decimal = Form(...),
+    minimum_order: Decimal = Form(default=Decimal("0.00")),
+    start_date: datetime = Form(...),
+    end_date: datetime = Form(...),
+    usage_limit_raw: Optional[str] = Form(default=None, alias="usage_limit"),
+    is_active: bool = Form(default=False),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    normalized_code = code.strip().upper()
+    if not normalized_code:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Coupon code is required")
+    if discount_type not in ("percentage", "fixed"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid discount type")
+    if discount_value <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Discount value must be greater than zero")
+    if discount_type == "percentage" and discount_value > 100:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Percentage discount cannot exceed 100")
+    if end_date <= start_date:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "End date must be after start date")
+
+    usage_limit: Optional[int] = None
+    if usage_limit_raw not in (None, ""):
+        try:
+            usage_limit = int(usage_limit_raw)
+        except ValueError:
+            usage_limit = None
+    if usage_limit is not None and usage_limit < 1:
+        usage_limit = None
+
+    coupon = db.get(Coupon, id) if id else Coupon(usage_count=0)
+    if id and coupon is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Coupon not found")
+
+    # البحث case-insensitive لأن التحقق عند الطلب يعتمد على upper().
+    existing = db.scalar(select(Coupon).where(func.upper(Coupon.code) == normalized_code))
+    if existing is not None and existing.id != coupon.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Coupon code already exists")
+
+    coupon.code = normalized_code
+    coupon.discount_type = discount_type
+    coupon.discount_value = discount_value
+    coupon.minimum_order = minimum_order
+    coupon.start_date = start_date
+    coupon.end_date = end_date
+    coupon.usage_limit = usage_limit
+    coupon.is_active = is_active
+    db.add(coupon)
+    db.commit()
+    return redirect("/admin/coupons")
+
+
+@router.post("/coupons/{coupon_id}/delete")
+def delete_coupon(coupon_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    coupon = db.get(Coupon, coupon_id)
+    if coupon is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Coupon not found")
+    # orders.coupon_id FK هو ON DELETE SET NULL فالحذف آمن — الخصم المحفوظ في الطلبات يفضل موجود.
+    db.delete(coupon)
+    db.commit()
+    return redirect("/admin/coupons")
+
+
+@router.get("/delivery-options", response_class=HTMLResponse)
+def delivery_options_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    options = db.scalars(select(DeliveryOption).order_by(DeliveryOption.sort_order, DeliveryOption.name)).all()
+    return templates.TemplateResponse("admin/delivery_options.html", {"request": request, "options": options})
+
+
+@router.post("/delivery-options")
+def save_delivery_option(
+    id: Optional[int] = Form(default=None),
+    name: str = Form(...),
+    description: Optional[str] = Form(default=None),
+    fee: Decimal = Form(default=Decimal("0.00")),
+    estimated_time: Optional[str] = Form(default=None),
+    sort_order: int = Form(default=0),
+    is_pickup: bool = Form(default=False),
+    is_active: bool = Form(default=False),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    option = db.get(DeliveryOption, id) if id else DeliveryOption()
+    if id and option is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Delivery option not found")
+    if fee < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Fee cannot be negative")
+    option.name = name.strip()
+    option.description = description or None
+    option.fee = fee
+    option.estimated_time = estimated_time or None
+    option.sort_order = sort_order
+    option.is_pickup = is_pickup
+    option.is_active = is_active
+    db.add(option)
+    db.commit()
+    return redirect("/admin/delivery-options")
+
+
+@router.post("/delivery-options/{option_id}/delete")
+def delete_delivery_option(option_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    option = db.get(DeliveryOption, option_id)
+    if option is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Delivery option not found")
+    # orders.delivery_option_id FK هو ON DELETE SET NULL فالحذف آمن — الرسوم المحفوظة في الطلبات تفضل موجودة.
+    db.delete(option)
+    db.commit()
+    return redirect("/admin/delivery-options")
 
 
 @router.get("/settings", response_class=HTMLResponse)

@@ -1,79 +1,97 @@
 <div class="border-t p-5">
 
+    <!-- الإجمالي من حساب الـBackend -->
     <div class="mb-4">
-
-        <p class="text-lg font-bold">
-
-            الإجمالى
-
-        </p>
-
+        <p class="text-lg font-bold">الإجمالى</p>
         <p class="mt-2 text-3xl font-extrabold text-primary">
-
-            <span x-text="total().toFixed(2)"></span>
-
-            {{ settings.currency }}
-
+            <span x-text="formatPrice(total())"></span> {{ settings.currency }}
         </p>
-
     </div>
 
-    <form
-        class="space-y-3"
-        @submit.prevent="submitOrder()">
+    <form class="space-y-4" @submit.prevent="submitOrder()">
 
-        <input
-            x-model="customer.name"
-            required
-            placeholder="الاسم"
+        <!-- طريقة الاستلام: توصيل / استلام -->
+        <div x-show="deliveryOptions.length > 0">
+            <p class="mb-2 text-sm font-bold">طريقة الاستلام</p>
+            <div class="grid grid-cols-2 gap-2">
+                <template x-for="opt in deliveryOptions" :key="opt.id">
+                    <label
+                        class="flex cursor-pointer flex-col items-center gap-0.5 rounded-xl border p-2.5 text-center transition"
+                        :class="selectedDeliveryId === opt.id ? 'border-primary bg-primary/5' : 'border-slate-200 hover:border-primary/40'">
+                        <input type="radio" name="delivery-option" class="sr-only" :value="opt.id"
+                            x-model.number="selectedDeliveryId" @change="onCheckoutChange()">
+                        <span class="text-sm font-bold" x-text="opt.name"></span>
+                        <span class="text-xs text-slate-500">
+                            <span x-show="opt.fee > 0">+<span x-text="formatPrice(opt.fee)"></span> {{ settings.currency }}</span>
+                            <span x-show="opt.fee <= 0">مجانًا</span>
+                        </span>
+                        <span class="text-[11px] text-slate-400" x-show="opt.estimated_time" x-text="opt.estimated_time"></span>
+                    </label>
+                </template>
+            </div>
+        </div>
 
-            class="w-full rounded-xl border p-3">
+        <!-- وقت الطلب: في أقرب وقت أو وقت محدد -->
+        <div>
+            <p class="mb-2 text-sm font-bold">وقت الطلب</p>
+            <div class="grid grid-cols-2 gap-2">
+                <label class="flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border p-2.5 text-sm font-semibold transition"
+                    :class="scheduling === 'asap' ? 'border-primary bg-primary/5' : 'border-slate-200'">
+                    <input type="radio" name="scheduling" value="asap" x-model="scheduling" @change="onCheckoutChange()">
+                    في أقرب وقت
+                </label>
+                <label class="flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border p-2.5 text-sm font-semibold transition"
+                    :class="scheduling === 'scheduled' ? 'border-primary bg-primary/5' : 'border-slate-200'">
+                    <input type="radio" name="scheduling" value="scheduled" x-model="scheduling" @change="onCheckoutChange()">
+                    وقت محدد
+                </label>
+            </div>
+            <input type="datetime-local" x-show="scheduling === 'scheduled'" x-model="scheduledTime"
+                :min="minScheduledTime()" @change="onCheckoutChange()"
+                class="mt-2 w-full rounded-xl border p-3 text-sm">
+        </div>
 
-        <input
-            x-model="customer.phone"
-            required
-            placeholder="رقم الهاتف"
+        <!-- بيانات العميل -->
+        <input x-model="customer.name" required placeholder="الاسم" class="w-full rounded-xl border p-3">
+        <input x-model="customer.phone" required placeholder="رقم الهاتف" class="w-full rounded-xl border p-3">
+        <template x-if="!isPickup()">
+            <input x-model="customer.address" required placeholder="العنوان" class="w-full rounded-xl border p-3">
+        </template>
+        <textarea x-model="customer.notes" rows="2" placeholder="ملاحظات عامة (اختياري)" class="w-full rounded-xl border p-3"></textarea>
 
-            class="w-full rounded-xl border p-3">
+        <!-- كوبون الخصم -->
+        <div>
+            <p class="mb-2 text-sm font-bold">كوبون خصم (اختياري)</p>
+            <div class="flex gap-2">
+                <input x-model="couponCode" @input="couponValid = null; couponMessage = ''" placeholder="كود الكوبون"
+                    class="min-w-0 flex-1 rounded-xl border p-3">
+                <button type="button" @click="applyCoupon()" :disabled="previewLoading"
+                    class="rounded-xl bg-slate-800 px-4 font-bold text-white transition disabled:opacity-50">تطبيق</button>
+            </div>
+            <p class="mt-1.5 text-xs font-semibold" x-show="couponMessage"
+                :class="couponValid ? 'text-emerald-600' : 'text-red-500'" x-text="couponMessage"></p>
+        </div>
 
-        <input
-            x-model="customer.address"
-            required
-            placeholder="العنوان"
-
-            class="w-full rounded-xl border p-3">
-
-        <textarea
-
-            x-model="customer.notes"
-
-            rows="3"
-
-            placeholder="ملاحظات"
-
-            class="w-full rounded-xl border p-3">
-
-        </textarea>
+        <!-- تفصيلة الحساب (محسوبة في الـBackend) -->
+        <div class="space-y-1 rounded-xl bg-slate-50 p-3 text-sm" x-show="items.length > 0">
+            <div class="flex justify-between"><span class="text-slate-500">الإجمالي الفرعي</span>
+                <span x-text="formatPrice(preview.subtotal)"></span></div>
+            <div class="flex justify-between text-emerald-600" x-show="preview.discount_amount > 0">
+                <span>الخصم</span><span>-<span x-text="formatPrice(preview.discount_amount)"></span></span></div>
+            <div class="flex justify-between" x-show="preview.delivery_fee > 0"><span class="text-slate-500">رسوم التوصيل</span>
+                <span x-text="formatPrice(preview.delivery_fee)"></span></div>
+            <div class="flex justify-between border-t border-slate-200 pt-1 font-extrabold text-primary">
+                <span>الإجمالي</span><span x-text="formatPrice(preview.total)"></span></div>
+        </div>
 
         <button
-
             :disabled="items.length===0||loading"
-
             class="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-4 font-bold text-white transition hover:bg-secondary disabled:opacity-50 active:scale-[0.98]">
-
             <span x-show="loading" class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
-
             <span x-text="loading ? 'جاري الإرسال...' : 'إرسال الطلب عبر واتساب'"></span>
-
         </button>
 
-        <p
-
-            class="text-center text-red-500"
-
-            x-text="error">
-
-        </p>
+        <p class="text-center text-red-500" x-text="error"></p>
 
     </form>
 

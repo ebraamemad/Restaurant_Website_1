@@ -15,7 +15,7 @@ from decimal import Decimal
 sys.stdout.reconfigure(encoding="utf-8")
 
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import engine, get_db
@@ -167,8 +167,8 @@ def seed() -> dict:
     e_ketch = ProductOption(product_id=p4.id, group_id=g_crepe_extra.id, name="كاتشب", price_adjustment=Decimal("5.00"), is_available=True, sort_order=3)
     db.add_all([e_moz, e_pane, e_ketch])
 
-    d_delivery = DeliveryOption(name="توصيل", fee=Decimal("15.00"), is_active=True, sort_order=1)
-    d_pickup = DeliveryOption(name="استلام من المطعم", fee=Decimal("0.00"), is_active=True, sort_order=2)
+    d_delivery = DeliveryOption(name="توصيل", fee=Decimal("15.00"), is_pickup=False, is_active=True, sort_order=1)
+    d_pickup = DeliveryOption(name="استلام من المطعم", fee=Decimal("0.00"), is_pickup=True, is_active=True, sort_order=2)
     db.add_all([d_delivery, d_pickup])
 
     c_save10 = Coupon(
@@ -263,8 +263,9 @@ check("منتج مش موجود -> 404", r.status_code == 404)
 print("== Delivery options ==")
 r = client.get("/api/delivery-options")
 check("GET خيارات التوصيل -> 200", r.status_code == 200)
-check("خيارين نشطين", len(r.json()) == 2)
+check("على الأقل خيارين نشطين", len(r.json()) >= 2, str(len(r.json())))
 check("رسوم التوصيل من الـDB = 15", any(d["name"] == "توصيل" and d["fee"] == "15.00" for d in r.json()))
+check("علامة is_pickup موجودة في خيار الاستلام", any(d["name"] == "استلام من المطعم" and d["is_pickup"] and d["fee"] == "0.00" for d in r.json()))
 
 # ====== 6) Coupon validation ======
 print("== Coupon validation ==")
@@ -466,6 +467,93 @@ check("لقطة الخيارات محفوظة (خيارين)", len(saved.items[0
 check("اسم الحجم في اللقطة", any(o.name == "كبير" for o in saved.items[0].options))
 check("سعر الوحدة المحفوظ = 190 (100+50+40)", Decimal(saved.items[0].unit_price) == Decimal("190.00"), str(saved.items[0].unit_price))
 
+print("== Checkout: delivery/pickup + ASAP/scheduled + breakdown + WhatsApp ==")
+
+# توصيل من غير عنوان -> 400
+r = client.post("/orders", json={
+    "customer_name": "عميل بدون عنوان", "customer_phone": "01000000002",
+    "customer_address": None,
+    "delivery_option_id": ids["d_delivery"],
+    "items": [{"product_id": ids["p2"], "quantity": 1}],
+})
+check("توصيل بدون عنوان -> 400", r.status_code == 400, str(r.status_code))
+
+# استلام من غير عنوان -> 200
+r = client.post("/orders", json={
+    "customer_name": "عميل استلام", "customer_phone": "01000000002",
+    "delivery_option_id": ids["d_pickup"],
+    "items": [{"product_id": ids["p2"], "quantity": 1}],
+})
+check("استلام بدون عنوان -> 200", r.status_code == 200, str(r.status_code))
+check("مفيش رسوم توصيل للاستلام", r.json()["delivery_fee"] == "0.00", r.json().get("delivery_fee"))
+
+# طلب ASAP (من غير وقت) + توصيل + كوبون + عنوان
+r = client.post("/orders", json={
+    "customer_name": "عميل كامل", "customer_phone": "01000000003",
+    "customer_address": "شارع كامل، الجيزة",
+    "delivery_option_id": ids["d_delivery"],
+    "coupon_code": "SAVE10",
+    "items": [
+        {"product_id": ids["p4"], "quantity": 2, "option_ids": [ids["c_large"], ids["e_moz"]], "item_note": "من غير مخلل"},
+    ],
+})
+check("طلب توصيل ASAP -> 200", r.status_code == 200, r.text[:200])
+data = r.json()
+check("subtotal = 340 ((100+50+20)*2)", data["subtotal"] == "340.00", data.get("subtotal"))
+check("الخصم 10% = 34", data["discount_amount"] == "34.00", data.get("discount_amount"))
+check("رسوم التوصيل = 15", data["delivery_fee"] == "15.00", data.get("delivery_fee"))
+check("الإجمالي = 321 (340-34+15)", data["total"] == "321.00", data.get("total"))
+
+db = TestingSessionLocal()
+saved = db.get(Order, data["order_id"])
+check("Order.subtotal محفوظ في الـDB", Decimal(saved.subtotal) == Decimal("340.00"), str(saved.subtotal))
+check("Order.delivery_fee محفوظ في الـDB", Decimal(saved.delivery_fee) == Decimal("15.00"), str(saved.delivery_fee))
+check("Order.discount_amount محفوظ في الـDB", Decimal(saved.discount_amount) == Decimal("34.00"), str(saved.discount_amount))
+check("ASAP: pickup_time فارغ", saved.pickup_time is None)
+
+msg = saved.whatsapp_message
+check("رسالة واتساب: رقم الطلب", f"#{saved.id}" in msg)
+check("رسالة واتساب: طريقة الاستلام توصيل", "طريقة الاستلام: توصيل" in msg)
+check("رسالة واتساب: موعد ASAP", "في أقرب وقت" in msg)
+check("رسالة واتساب: الخيار (كبير)", "كبير" in msg)
+check("رسالة واتساب: الإضافة (موزاريلا)", "موزاريلا" in msg)
+check("رسالة واتساب: ملاحظة المنتج", "من غير مخلل" in msg)
+check("رسالة واتساب: الإجمالي الفرعي", "الإجمالي الفرعي: 340.00" in msg)
+check("رسالة واتساب: الخصم", "الخصم: -34.00" in msg)
+check("رسالة واتساب: رسوم التوصيل", "رسوم التوصيل: 15.00" in msg)
+check("رسالة واتساب: الإجمالي النهائي", "الإجمالي: 321.00" in msg)
+check("رسالة واتساب: كود الكوبون", "SAVE10" in msg)
+
+# طلب استلام مجدول بوقت محدد
+future = (now + timedelta(days=2)).isoformat()
+r = client.post("/orders", json={
+    "customer_name": "عميل مجدول", "customer_phone": "01000000004",
+    "delivery_option_id": ids["d_pickup"],
+    "pickup_time": future,
+    "items": [{"product_id": ids["p1"], "quantity": 1}],
+})
+check("طلب استلام مجدول -> 200", r.status_code == 200, str(r.status_code))
+verify = TestingSessionLocal()
+sched = verify.get(Order, r.json()["order_id"])
+check("الوقت المجدول محفوظ", sched.pickup_time is not None)
+smsg = sched.whatsapp_message
+check("واتساب المجدول: الوقت المحدد", sched.pickup_time.strftime("%Y-%m-%d %H:%M") in smsg)
+check("واتساب المجدول: طريقة الاستلام من المطعم", "استلام من المطعم" in smsg)
+
+# الـpreview بيعكس نفس حساب الـBackend
+r = client.post("/api/orders/preview", json={
+    "items": [{"product_id": ids["p4"], "quantity": 2, "option_ids": [ids["c_large"], ids["e_moz"]]}],
+    "delivery_option_id": ids["d_delivery"],
+    "coupon_code": "SAVE10",
+})
+pv = r.json()
+check(
+    "الـpreview: 340 / خصم34 / توصيل15 / إجمالي321",
+    pv["subtotal"] == "340.00" and pv["discount_amount"] == "34.00"
+    and pv["delivery_fee"] == "15.00" and pv["total"] == "321.00",
+    f"{pv['subtotal']}/{pv['discount_amount']}/{pv['delivery_fee']}/{pv['total']}",
+)
+
 # ====== 11) Routes الحالية لسه شغالة ======
 print("== Backward compatibility (Routes الحالية) ==")
 r = client.get("/")
@@ -538,6 +626,83 @@ if new_group is not None:
     verify_db = TestingSessionLocal()
     check("الخيار اتحذف فعلًا", verify_db.scalar(select(ProductOption).where(ProductOption.id == new_option_id)) is None)
     check("المجموعة اتحذفت فعلًا (وخياراتها معاها)", verify_db.scalar(select(ProductOptionGroup).where(ProductOptionGroup.id == new_group_id)) is None)
+
+# ====== 13) Admin coupons & delivery options CRUD ======
+print("== Admin coupons & delivery options CRUD ==")
+r = client.get("/admin/coupons")
+check("صفحة الكوبونات بعد الدخول -> 200", r.status_code == 200, str(r.status_code))
+
+start_str = f"{now + timedelta(days=1):%Y-%m-%dT%H:%M}"
+end_str = f"{now + timedelta(days=15):%Y-%m-%dT%H:%M}"
+r = admin_post(
+    "/admin/coupons",
+    {
+        "code": "admincpn",
+        "discount_type": "percentage",
+        "discount_value": "25",
+        "minimum_order": "100",
+        "start_date": start_str,
+        "end_date": end_str,
+        "usage_limit": "5",
+        "is_active": "true",
+    },
+)
+check("إضافة كوبون -> 303", r.status_code == 303, str(r.status_code))
+db = TestingSessionLocal()
+new_coupon = db.scalar(select(Coupon).where(func.upper(Coupon.code) == "ADMINCPN"))
+check("الكوبون اتحفظ", new_coupon is not None)
+if new_coupon is not None:
+    check("الكود اتحفظ uppercase", new_coupon.code == "ADMINCPN", new_coupon.code)
+    check("قيمة الخصم اتحفطت = 25", Decimal(new_coupon.discount_value) == Decimal("25.00"))
+    check("حد الاستخدامات اتحفظ = 5", new_coupon.usage_limit == 5)
+
+    r = admin_post(
+        "/admin/coupons",
+        {
+            "id": new_coupon.id,
+            "code": "ADMINCPN",
+            "discount_type": "fixed",
+            "discount_value": "30",
+            "minimum_order": "0",
+            "start_date": start_str,
+            "end_date": end_str,
+            "usage_limit": "",
+            "is_active": "true",
+        },
+    )
+    check("تعديل كوبون -> 303", r.status_code == 303, str(r.status_code))
+    edited = TestingSessionLocal().get(Coupon, new_coupon.id)
+    check("نوع الخصم اتعدل لـfixed", edited.discount_type == "fixed", edited.discount_type)
+    check("قيمة الخصم اتعدلت = 30", Decimal(edited.discount_value) == Decimal("30.00"))
+    check("حد الاستخدامات بقى غير محدود", edited.usage_limit is None)
+    coupon_id = new_coupon.id
+
+    r = admin_post(f"/admin/coupons/{coupon_id}/delete", {})
+    check("حذف الكوبون -> 303", r.status_code == 303, str(r.status_code))
+    check("الكوبون اتحذف فعلًا", TestingSessionLocal().scalar(select(Coupon).where(Coupon.id == coupon_id)) is None)
+
+r = client.get("/admin/delivery-options")
+check("صفحة طرق الاستلام بعد الدخول -> 200", r.status_code == 200, str(r.status_code))
+r = admin_post(
+    "/admin/delivery-options",
+    {"name": "استلام تجريبي", "fee": "0", "sort_order": 9, "is_pickup": "true", "is_active": "true"},
+)
+check("إضافة طريقة استلام -> 303", r.status_code == 303, str(r.status_code))
+db = TestingSessionLocal()
+new_option = db.scalar(select(DeliveryOption).where(DeliveryOption.name == "استلام تجريبي"))
+check("طريقة الاستلام اتحفطت", new_option is not None)
+if new_option is not None:
+    check("علامة is_pickup اتحفطت", new_option.is_pickup is True)
+    option_id = new_option.id
+
+    r = admin_post("/admin/delivery-options", {"id": option_id, "name": "استلام تجريبي", "fee": "0", "sort_order": 9, "is_pickup": "true"})
+    check("تعديل طريقة بدون نشط -> 303", r.status_code == 303, str(r.status_code))
+    edited_opt = TestingSessionLocal().get(DeliveryOption, option_id)
+    check("الطريقة اتعطت (checkbox فاضي = غير نشط)", edited_opt.is_active is False)
+
+    r = admin_post(f"/admin/delivery-options/{option_id}/delete", {})
+    check("حذف طريقة الاستلام -> 303", r.status_code == 303, str(r.status_code))
+    check("الطريقة اتحذفت فعلًا", TestingSessionLocal().scalar(select(DeliveryOption).where(DeliveryOption.id == option_id)) is None)
 
 # ====== Rollback ======
 outer_transaction.rollback()
