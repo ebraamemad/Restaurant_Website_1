@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -7,7 +9,7 @@ from pathlib import Path
 from typing import Optional, Type, Union
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import distinct, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -20,7 +22,9 @@ from app.models import (
     Addon,
     Category,
     Coupon,
+    Customer,
     DeliveryOption,
+    DeliveryZone,
     Order,
     OrderItem,
     Product,
@@ -33,6 +37,7 @@ from app.security import csrf_field
 from app.utils import (
     THEME_DEFAULTS,
     build_search_variants,
+    build_whatsapp_url,
     make_slug,
     normalize_hex_color,
     parse_theme_colors,
@@ -44,6 +49,7 @@ TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.globals["csrf_field"] = csrf_field
 templates.env.globals["theme_colors"] = parse_theme_colors
+templates.env.globals["whatsapp_url"] = lambda phone: build_whatsapp_url(phone, "")
 UPLOADS_DIR = Path(__file__).resolve().parents[1] / "uploads"
 STATUS_LABELS = {
     OrderStatus.pending.value: "قيد الانتظار",
@@ -96,6 +102,24 @@ def get_dashboard_stats(db: Session):
         .limit(5)
     ).all()
     return top_products, top_customers
+
+
+def customer_rows(db: Session, sort: str = "spent"):
+    valid_order = Order.status != OrderStatus.cancelled.value
+    total_orders = func.count(Order.id).filter(valid_order)
+    total_spent = func.coalesce(func.sum(Order.total).filter(valid_order), 0)
+    statement = (
+        select(Customer, total_orders.label("total_orders"), total_spent.label("total_spent"))
+        .outerjoin(Order, Order.customer_id == Customer.id)
+        .group_by(Customer.id)
+    )
+    if sort == "orders":
+        statement = statement.order_by(total_orders.desc(), total_spent.desc())
+    elif sort == "last":
+        statement = statement.order_by(Customer.last_order_at.desc())
+    else:
+        statement = statement.order_by(total_spent.desc(), total_orders.desc())
+    return db.execute(statement).all()
 
 
 @router.get("", response_class=HTMLResponse)
@@ -210,6 +234,8 @@ async def save_product(
     image: Optional[UploadFile] = File(default=None),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
+    if base_price < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "السعر الأساسي لا يمكن أن يكون سالبًا")
     if db.get(Category, category_id) is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Category does not exist")
     product = db.get(Product, id) if id else Product()
@@ -408,7 +434,13 @@ def delete_product_option(product_id: int, option_id: int, db: Session = Depends
 
 
 @router.get("/orders", response_class=HTMLResponse)
-def orders_page(request: Request, status_filter: Optional[str] = None, db: Session = Depends(get_db)) -> HTMLResponse:
+def orders_page(
+    request: Request,
+    status_filter: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
     statement = (
         select(Order)
         .options(
@@ -421,10 +453,30 @@ def orders_page(request: Request, status_filter: Optional[str] = None, db: Sessi
     )
     if status_filter:
         statement = statement.where(Order.status == status_filter)
+    parsed_from = parsed_to = None
+    try:
+        if date_from:
+            parsed_from = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            statement = statement.where(Order.created_at >= parsed_from)
+        if date_to:
+            parsed_to = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+            statement = statement.where(Order.created_at < parsed_to)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "صيغة التاريخ غير صحيحة") from exc
     orders = db.scalars(statement).all()
+    summary_statement = select(func.count(Order.id), func.coalesce(func.sum(Order.total), 0))
+    if parsed_from is not None:
+        summary_statement = summary_statement.where(Order.created_at >= parsed_from)
+    if parsed_to is not None:
+        summary_statement = summary_statement.where(Order.created_at < parsed_to)
+    if status_filter:
+        summary_statement = summary_statement.where(Order.status == status_filter)
+    orders_count, sales_total = db.execute(summary_statement).one()
     return templates.TemplateResponse(
         "admin/orders.html",
-        {"request": request, "orders": orders, "statuses": list(OrderStatus), "status_labels": STATUS_LABELS},
+        {"request": request, "orders": orders, "statuses": list(OrderStatus), "status_labels": STATUS_LABELS,
+         "status_filter": status_filter, "date_from": date_from or "", "date_to": date_to or "",
+         "orders_count": orders_count, "sales_total": sales_total},
     )
 
 
@@ -529,7 +581,64 @@ def delete_coupon(coupon_id: int, db: Session = Depends(get_db)) -> RedirectResp
 @router.get("/delivery-options", response_class=HTMLResponse)
 def delivery_options_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     options = db.scalars(select(DeliveryOption).order_by(DeliveryOption.sort_order, DeliveryOption.name)).all()
-    return templates.TemplateResponse("admin/delivery_options.html", {"request": request, "options": options})
+    zones = db.scalars(select(DeliveryZone).order_by(DeliveryZone.sort_order, DeliveryZone.name)).all()
+    return templates.TemplateResponse("admin/delivery_options.html", {"request": request, "options": options, "zones": zones})
+
+
+@router.post("/delivery-zones")
+def save_delivery_zone(
+    id: Optional[int] = Form(default=None),
+    name: str = Form(...),
+    fee: Decimal = Form(default=Decimal("0.00")),
+    sort_order: int = Form(default=0),
+    is_active: bool = Form(default=False),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    if fee < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "رسوم المنطقة لا يمكن أن تكون سالبة")
+    zone = db.get(DeliveryZone, id) if id else DeliveryZone()
+    if id and zone is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "منطقة التوصيل غير موجودة")
+    zone.name = name.strip()
+    zone.fee = fee
+    zone.sort_order = sort_order
+    zone.is_active = is_active
+    db.add(zone)
+    db.commit()
+    return redirect("/admin/delivery-options")
+
+
+@router.post("/delivery-zones/{zone_id}/delete")
+def delete_delivery_zone(zone_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    zone = db.get(DeliveryZone, zone_id)
+    if zone is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "منطقة التوصيل غير موجودة")
+    db.delete(zone)
+    db.commit()
+    return redirect("/admin/delivery-options")
+
+
+@router.get("/customers", response_class=HTMLResponse)
+def customers_page(request: Request, sort: str = "spent", db: Session = Depends(get_db)) -> HTMLResponse:
+    if sort not in {"spent", "orders", "last"}:
+        sort = "spent"
+    return templates.TemplateResponse(
+        "admin/customers.html", {"request": request, "customers": customer_rows(db, sort), "sort": sort,
+                                  "settings": get_or_create_settings(db)}
+    )
+
+
+@router.get("/customers/export")
+def export_customers(sort: str = "spent", db: Session = Depends(get_db)) -> Response:
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["الاسم", "رقم الهاتف", "عدد الطلبات", "إجمالي المشتريات", "أول طلب", "آخر طلب"])
+    for customer, total_orders, total_spent in customer_rows(db, sort):
+        writer.writerow([customer.name or "", customer.phone, total_orders, total_spent, customer.first_order_at, customer.last_order_at])
+    return Response(
+        content="\ufeff" + output.getvalue(), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=customers.csv"},
+    )
 
 
 @router.post("/delivery-options")

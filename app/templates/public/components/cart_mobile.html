@@ -4,15 +4,18 @@
 
     x-transition
 
-    class="fixed inset-0 z-50 bg-black/40 lg:hidden">
+    class="fixed inset-0 z-50 bg-black/45 lg:hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-label="سلة الطلب">
 
     <div
 
         @click.outside="cartOpen=false"
 
-        class="absolute bottom-0 left-0 right-0 max-h-[90vh] overflow-auto rounded-t-3xl bg-white shadow-2xl">
+        class="mobile-cart-sheet mobile-no-scroll absolute bottom-0 left-0 right-0 max-h-[92vh] overflow-y-auto rounded-t-3xl bg-white shadow-2xl">
 
-        <div class="flex items-center justify-between border-b p-4 sm:p-5">
+        <div class="sticky top-0 z-10 flex items-center justify-between border-b bg-white/95 p-4 backdrop-blur sm:p-5">
 
             <h2 class="text-xl font-bold">
                 سلة الطلب
@@ -20,7 +23,7 @@
 
             <button
                 @click="cartOpen=false"
-                class="text-2xl"
+                class="touch-target rounded-full text-2xl"
                 aria-label="إغلاق">
                 ✕
             </button>

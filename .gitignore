@@ -19,6 +19,12 @@ env/
 .env.*
 !.env.example
 
+# Runtime and local tooling
+*.log
+docker-compose.override.yml
+.DS_Store
+Thumbs.db
+
 # Uploads (keep the folder in git via .gitkeep, ignore uploaded content)
 app/uploads/*
 !app/uploads/.gitkeep
@@ -34,12 +40,6 @@ app/uploads/*
 *.db
 
 # Logs
-*.log
-
-# OS
-.DS_Store
-Thumbs.db
-
 # Alembic Cache
 alembic/__pycache__/
 alembic/versions/__pycache__/

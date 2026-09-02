@@ -27,7 +27,7 @@ class ProductForm(BaseModel):
     category_id: int = Field(gt=0)
     name: str = Field(min_length=2, max_length=160)
     description: Optional[str] = Field(default=None, max_length=2000)
-    base_price: Decimal = Field(gt=0, decimal_places=2)
+    base_price: Decimal = Field(ge=0, decimal_places=2)
     unit: str = Field(default="piece", min_length=1, max_length=40)
     sort_order: int = Field(default=0, ge=0)
     is_available: bool = True
@@ -71,6 +71,7 @@ class OrderCreate(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=1000)
     items: List[CartItemIn] = Field(min_length=1)
     delivery_option_id: Optional[int] = Field(default=None, gt=0)
+    delivery_zone_id: Optional[int] = Field(default=None, gt=0)
     coupon_code: Optional[str] = Field(default=None, max_length=50)
     pickup_time: Optional[datetime] = None
 
@@ -95,6 +96,16 @@ class DeliveryOptionOut(BaseModel):
     fee: Decimal
     estimated_time: Optional[str]
     is_pickup: bool
+
+
+class DeliveryZoneOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    fee: Decimal
+    is_active: bool
+    sort_order: int
 
 
 class ProductOptionOut(BaseModel):
@@ -134,6 +145,7 @@ class CategoryOut(BaseModel):
 class OrderPreviewIn(BaseModel):
     items: List[CartItemIn] = Field(min_length=1)
     delivery_option_id: Optional[int] = Field(default=None, gt=0)
+    delivery_zone_id: Optional[int] = Field(default=None, gt=0)
     coupon_code: Optional[str] = Field(default=None, max_length=50)
 
 
@@ -229,3 +241,13 @@ class DashboardSummary(BaseModel):
     month_orders: int
     total_sales: Decimal
     customers_count: int
+
+
+class CustomerSummary(BaseModel):
+    id: int
+    phone: str
+    name: Optional[str]
+    first_order_at: datetime
+    last_order_at: datetime
+    total_orders: int
+    total_spent: Decimal

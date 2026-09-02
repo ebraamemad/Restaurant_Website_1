@@ -21,7 +21,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Addon, Coupon, DeliveryOption, Product, ProductOption, ProductOptionGroup
+from app.models import Addon, Coupon, DeliveryOption, DeliveryZone, Product, ProductOption, ProductOptionGroup
 from app.utils import ensure_aware
 
 if TYPE_CHECKING:
@@ -58,6 +58,7 @@ class PricingResult:
     coupon_code: Optional[str] = None
     discount_amount: Decimal = ZERO
     delivery_option: Optional[DeliveryOption] = None
+    delivery_zone: Optional[DeliveryZone] = None
     delivery_fee: Decimal = ZERO
     total: Decimal = ZERO
 
@@ -257,10 +258,20 @@ def resolve_delivery_option(db: Session, delivery_option_id: Optional[int]) -> O
     return delivery_option
 
 
+def resolve_delivery_zone(db: Session, delivery_zone_id: Optional[int]) -> Optional[DeliveryZone]:
+    if delivery_zone_id is None:
+        return None
+    zone = db.get(DeliveryZone, delivery_zone_id)
+    if zone is None or not zone.is_active:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "منطقة التوصيل المحددة غير متاحة")
+    return zone
+
+
 def compute_pricing(
     db: Session,
     items: List["CartItemIn"],
     delivery_option_id: Optional[int] = None,
+    delivery_zone_id: Optional[int] = None,
     coupon_code: Optional[str] = None,
 ) -> PricingResult:
     """الحساب الكامل للطلب من Database: الأسطر + الخصم + الرسوم + الإجمالي."""
@@ -268,7 +279,16 @@ def compute_pricing(
     subtotal = compute_subtotal(lines)
 
     delivery_option = resolve_delivery_option(db, delivery_option_id)
-    delivery_fee = quantize_money(delivery_option.fee) if delivery_option is not None else ZERO
+    delivery_zone = resolve_delivery_zone(db, delivery_zone_id)
+    if delivery_zone is not None and delivery_option is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "يجب اختيار طريقة التوصيل قبل المنطقة")
+    if delivery_zone is not None and delivery_option is not None and delivery_option.is_pickup:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "لا يمكن اختيار منطقة مع الاستلام من المطعم")
+    if delivery_option is not None and not delivery_option.is_pickup and delivery_zone is None:
+        zones_exist = db.scalar(select(func.count(DeliveryZone.id))) or 0
+        if zones_exist:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "اختر منطقة التوصيل")
+    delivery_fee = quantize_money(delivery_zone.fee if delivery_zone is not None else (delivery_option.fee if delivery_option is not None else ZERO))
 
     coupon: Optional[Coupon] = None
     discount_amount = ZERO
@@ -286,6 +306,7 @@ def compute_pricing(
         coupon_code=coupon.code if coupon is not None else None,
         discount_amount=discount_amount,
         delivery_option=delivery_option,
+        delivery_zone=delivery_zone,
         delivery_fee=delivery_fee,
         total=total,
     )

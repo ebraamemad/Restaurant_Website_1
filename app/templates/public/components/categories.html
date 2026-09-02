@@ -1,4 +1,12 @@
-<div class="mb-4 sm:mb-6">
+<div class="mb-6 sm:mb-8">
+
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">اختار وجبتك</p>
+            <h2>تصفّح القائمة</h2>
+        </div>
+        <span class="hidden text-sm text-slate-500 sm:block">كل ما تحبه في مكان واحد</span>
+    </div>
 
     <div class="flex gap-2 overflow-x-auto pb-2 sm:gap-3">
 
@@ -6,7 +14,7 @@
 
         <a
             href="#cat-{{ category.id }}"
-            class="chip-scroll flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm ring-1 ring-slate-200/70 transition duration-200 hover:-translate-y-0.5 hover:bg-primary hover:text-white hover:ring-primary active:scale-[0.98] sm:px-4 sm:py-2.5 sm:text-base">
+            class="chip-scroll flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg bg-white px-3 py-2.5 text-sm font-bold text-slate-700 shadow-sm ring-1 ring-slate-200/70 transition duration-200 hover:-translate-y-0.5 hover:bg-primary hover:text-white hover:ring-primary active:scale-[0.98] sm:px-4 sm:py-3 sm:text-base">
 
             {% if category.image_url %}
 

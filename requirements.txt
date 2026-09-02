@@ -1,4 +1,4 @@
-# Python version: 3.13
+# Python version: 3.13.5
 fastapi==0.116.1
 uvicorn[standard]==0.33.0
 gunicorn==23.0.0

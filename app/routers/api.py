@@ -13,7 +13,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
-from app.models import Category, Coupon, DeliveryOption, Product, ProductOptionGroup
+from app.models import Category, Coupon, DeliveryOption, DeliveryZone, Product, ProductOptionGroup
 from app.ordering import (
     ZERO,
     calc_coupon_discount,
@@ -29,6 +29,7 @@ from app.schemas import (
     CouponValidateIn,
     CouponValidateOut,
     DeliveryOptionOut,
+    DeliveryZoneOut,
     OrderPreviewIn,
     OrderPreviewItemOut,
     OrderPreviewOut,
@@ -150,6 +151,17 @@ def list_delivery_options(db: Session = Depends(get_db)) -> List[DeliveryOption]
     )
 
 
+@router.get("/delivery-zones", response_model=List[DeliveryZoneOut])
+def list_delivery_zones(db: Session = Depends(get_db)) -> List[DeliveryZone]:
+    return list(
+        db.scalars(
+            select(DeliveryZone)
+            .where(DeliveryZone.is_active.is_(True))
+            .order_by(DeliveryZone.sort_order, DeliveryZone.name)
+        ).all()
+    )
+
+
 @router.post("/coupons/validate", response_model=CouponValidateOut)
 def validate_coupon_endpoint(payload: CouponValidateIn, db: Session = Depends(get_db)) -> CouponValidateOut:
     # الإجمالي الفرعي بيتحسب هنا في الـBackend من Database — مش من العميل.
@@ -190,6 +202,7 @@ def preview_order(payload: OrderPreviewIn, db: Session = Depends(get_db)) -> Ord
         db,
         payload.items,
         delivery_option_id=payload.delivery_option_id,
+        delivery_zone_id=payload.delivery_zone_id,
         coupon_code=payload.coupon_code if has_coupon else None,
     )
     if has_coupon:

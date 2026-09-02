@@ -47,7 +47,7 @@ class Product(Base):
     name: Mapped[str] = mapped_column(String(160))
     slug: Mapped[str] = mapped_column(String(200), unique=True, index=True)
     description: Mapped[Optional[str]] = mapped_column(Text)
-    base_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)  # السعر الأساسي قبل الخيارات
+    base_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)  # صفر مسموح للمنتجات المسعرة بالخيارات
     unit: Mapped[str] = mapped_column(String(40), default="piece")
     image_url: Mapped[Optional[str]] = mapped_column(String(500))
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -96,14 +96,18 @@ class Order(Base):
     total: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     whatsapp_message: Mapped[str] = mapped_column(Text)
     delivery_option_id: Mapped[Optional[int]] = mapped_column(ForeignKey("delivery_options.id", ondelete="SET NULL"))
+    delivery_zone_id: Mapped[Optional[int]] = mapped_column(ForeignKey("delivery_zones.id", ondelete="SET NULL"), index=True)
     coupon_id: Mapped[Optional[int]] = mapped_column(ForeignKey("coupons.id", ondelete="SET NULL"), index=True)
+    customer_id: Mapped[Optional[int]] = mapped_column(ForeignKey("customers.id", ondelete="SET NULL"), index=True)
     pickup_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     items: Mapped[List["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
     delivery_option: Mapped[Optional["DeliveryOption"]] = relationship(back_populates="orders")
+    delivery_zone: Mapped[Optional["DeliveryZone"]] = relationship(back_populates="orders")
     coupon: Mapped[Optional["Coupon"]] = relationship(back_populates="orders")
+    customer: Mapped[Optional["Customer"]] = relationship(back_populates="orders")
 
 
 class OrderItem(Base):
@@ -173,6 +177,20 @@ class RestaurantSettings(Base):
     additional_info: Mapped[Optional[str]] = mapped_column(Text)  # Additional info displayed at bottom
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Customer(Base):
+    __tablename__ = "customers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    phone: Mapped[str] = mapped_column(String(30), unique=True, index=True)
+    name: Mapped[Optional[str]] = mapped_column(String(120))
+    first_order_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_order_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    orders: Mapped[List["Order"]] = relationship(back_populates="customer")
 
 
 class ProductOptionGroup(Base):
@@ -256,4 +274,18 @@ class DeliveryOption(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     orders: Mapped[List["Order"]] = relationship(back_populates="delivery_option")
+
+
+class DeliveryZone(Base):
+    __tablename__ = "delivery_zones"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    orders: Mapped[List["Order"]] = relationship(back_populates="delivery_zone")
 

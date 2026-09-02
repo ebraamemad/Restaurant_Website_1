@@ -1,0 +1,36 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <p class="text-sm font-semibold text-emerald-700">قاعدة بيانات العملاء</p>
+    <h1 class="text-2xl font-bold">العملاء</h1>
+    <p class="mt-1 text-sm text-slate-500">كل رقم يظهر مرة واحدة، والإحصائيات محسوبة من الطلبات الفعلية.</p>
+  </div>
+  <div class="flex flex-wrap gap-2">
+    <a href="/admin/customers/export?sort={{ sort }}" class="rounded bg-slate-900 px-4 py-2 text-sm font-bold text-white">تصدير العملاء CSV</a>
+    <a href="/admin/customers?sort=spent" class="rounded border px-3 py-2 text-sm {% if sort == 'spent' %}border-emerald-600 text-emerald-700{% endif %}">الأكثر شراءً</a>
+    <a href="/admin/customers?sort=orders" class="rounded border px-3 py-2 text-sm {% if sort == 'orders' %}border-emerald-600 text-emerald-700{% endif %}">الأكثر طلبًا</a>
+    <a href="/admin/customers?sort=last" class="rounded border px-3 py-2 text-sm {% if sort == 'last' %}border-emerald-600 text-emerald-700{% endif %}">الأحدث</a>
+  </div>
+</div>
+<div class="overflow-x-auto rounded bg-white shadow-sm">
+  <table class="w-full min-w-[850px] text-sm">
+    <thead class="bg-slate-100 text-right"><tr>
+      <th class="p-3">العميل</th><th class="p-3">رقم الهاتف</th><th class="p-3">عدد الطلبات</th><th class="p-3">إجمالي المشتريات</th><th class="p-3">أول طلب</th><th class="p-3">آخر طلب</th><th class="p-3">تواصل</th>
+    </tr></thead>
+    <tbody>
+      {% for customer, total_orders, total_spent in customers %}
+      <tr class="border-t">
+        <td class="p-3 font-semibold">{{ customer.name or "غير مسجل" }}</td>
+        <td class="p-3" dir="ltr">{{ customer.phone }}</td>
+        <td class="p-3">{{ total_orders }}</td>
+        <td class="p-3 font-bold text-emerald-700">{{ total_spent }} {{ settings.currency }}</td>
+        <td class="p-3 text-slate-500">{{ customer.first_order_at.strftime("%Y-%m-%d %H:%M") }}</td>
+        <td class="p-3 text-slate-500">{{ customer.last_order_at.strftime("%Y-%m-%d %H:%M") }}</td>
+        <td class="p-3"><a href="{{ whatsapp_url(customer.phone) }}" target="_blank" rel="noopener" class="inline-flex rounded bg-[#25D366] px-3 py-2 font-bold text-white">WhatsApp</a></td>
+      </tr>
+      {% else %}<tr><td colspan="7" class="p-6 text-center text-slate-500">لا يوجد عملاء بعد.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

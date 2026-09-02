@@ -8,7 +8,7 @@
 
             <span class="h-7 w-1.5 rounded-full bg-primary" aria-hidden="true"></span>
 
-            <h2 class="text-xl font-extrabold sm:text-2xl">
+            <h2 class="text-lg font-extrabold sm:text-2xl">
 
                 {{ category.name }}
 
@@ -22,7 +22,8 @@
 
         </div>
 
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
+        <!-- عمودين على الموبايل: كروت أصغر وأكثر ترتيبًا -->
+        <div class="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
 
             {% for product in category.products %}
 
@@ -42,7 +43,7 @@
 
 {% elif products %}
 
-    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
+    <div class="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
 
         {% for product in products %}
 

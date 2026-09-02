@@ -61,7 +61,9 @@ function storeCart() {
 
     // ===== Checkout: طريقة الاستلام + الوقت + الكوبون + معاينة الحساب من الـBackend =====
     deliveryOptions: [],
+    deliveryZones: [],
     selectedDeliveryId: null,
+    selectedZoneId: null,
     scheduling: "asap", // "asap" | "scheduled"
     scheduledTime: "",
     couponCode: "",
@@ -81,13 +83,17 @@ function storeCart() {
 
     async loadCheckout() {
       try {
-        const resp = await fetch("/api/delivery-options");
-        if (resp.ok) {
-          this.deliveryOptions = await resp.json();
+        const [optionsResp, zonesResp] = await Promise.all([
+          fetch("/api/delivery-options"),
+          fetch("/api/delivery-zones"),
+        ]);
+        if (optionsResp.ok) {
+          this.deliveryOptions = await optionsResp.json();
           if (this.deliveryOptions.length && this.selectedDeliveryId === null) {
             this.selectedDeliveryId = this.deliveryOptions[0].id;
           }
         }
+        if (zonesResp.ok) this.deliveryZones = await zonesResp.json();
       } catch {}
       this.refreshPreview();
     },
@@ -134,6 +140,7 @@ function storeCart() {
           body: JSON.stringify({
             items: this.mappedItems(),
             delivery_option_id: this.selectedDeliveryId,
+            delivery_zone_id: this.isPickup() ? null : this.selectedZoneId,
             coupon_code: this.couponCode.trim() || null,
           }),
         });
@@ -300,6 +307,7 @@ function storeCart() {
             customer_address: this.isPickup() ? null : this.customer.address.trim(),
             notes: this.customer.notes || null,
             delivery_option_id: this.selectedDeliveryId,
+            delivery_zone_id: this.isPickup() ? null : this.selectedZoneId,
             coupon_code: this.couponCode.trim() || null,
             pickup_time: pickupTime,
             items: this.mappedItems(),

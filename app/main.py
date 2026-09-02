@@ -12,6 +12,7 @@
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
@@ -27,6 +28,11 @@ app = FastAPI(title=settings.app_name)
 #دي عشان يخلي الملفات الثابتة والصور المرفوعة تتفتح من المتصفح.
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+
+
+@app.get("/health", include_in_schema=False)
+def health() -> JSONResponse:
+    return JSONResponse({"status": "ok"})
 
 
 def _is_admin_path(path: str) -> bool:

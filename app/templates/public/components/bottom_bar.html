@@ -1,30 +1,29 @@
 <div
-
-class="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 p-3 shadow-[0_-10px_40px_rgba(0,0,0,0.12)] backdrop-blur lg:hidden">
+    x-show="!cartOpen"
+    x-cloak
+    x-transition
+    class="fixed bottom-0 left-0 right-0 z-40 safe-bottom border-t border-slate-200 bg-white/95 px-3 pt-2 shadow-[0_-10px_40px_rgba(0,0,0,0.12)] backdrop-blur lg:hidden">
 
     <button
-
         @click="cartOpen=true"
+        class="touch-target flex min-h-[52px] w-full items-center justify-between rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white shadow-lg transition active:scale-[0.98]">
 
-        class="flex min-h-[52px] w-full items-center justify-between rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-white shadow-lg transition active:scale-[0.98]">
-
-        <div>
-
-            🛒
-
+        <span class="flex items-center gap-2">
+            <span class="relative inline-flex" aria-hidden="true">
+                🛒
+                <span
+                    x-show="items.length > 0"
+                    class="absolute -top-2 -right-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1 text-[11px] font-extrabold text-primary shadow"
+                    x-text="count()"></span>
+            </span>
             <span x-text="items.length"></span>
-
             منتجات
+        </span>
 
-        </div>
-
-        <div>
-
-            <span x-text="total().toFixed(2)"></span>
-
+        <span class="price-num flex items-center gap-1.5">
+            <span x-text="formatPrice(total())"></span>
             {{ settings.currency }}
-
-        </div>
+        </span>
 
     </button>
 

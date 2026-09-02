@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
 from app.models import (
     Category,
+    Customer,
     Order,
     OrderItem,
     OrderItemAddon,
@@ -22,7 +24,7 @@ from app.models import (
 )
 from app.ordering import compute_pricing, validate_scheduled_time
 from app.schemas import AddonOut, OrderCreate, OrderCreated, OrderStatus, ProductDetailOut
-from app.utils import build_search_variants, build_whatsapp_message, build_whatsapp_url, parse_theme_colors
+from app.utils import build_search_variants, build_whatsapp_message, build_whatsapp_url, normalize_phone, parse_theme_colors
 
 router = APIRouter()
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
@@ -150,6 +152,7 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
         db,
         payload.items,
         delivery_option_id=payload.delivery_option_id,
+        delivery_zone_id=payload.delivery_zone_id,
         coupon_code=payload.coupon_code,
     )
 
@@ -172,6 +175,7 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
         total=pricing.total,
         whatsapp_message="",
         delivery_option_id=delivery_option.id if delivery_option else None,
+        delivery_zone_id=pricing.delivery_zone.id if pricing.delivery_zone else None,
         coupon_id=pricing.coupon.id if pricing.coupon else None,
         pickup_time=scheduled_time,
     )
@@ -212,12 +216,25 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
             }
         )
 
-    # 5) خصم استخدام الكوبون بعد نجاح الحساب.
+    # 5) تجميع الطلبات تحت عميل واحد حسب الرقم الموحد.
+    normalized_phone = normalize_phone(payload.customer_phone)
+    customer = db.scalar(select(Customer).where(Customer.phone == normalized_phone)) if normalized_phone else None
+    now = order.created_at or datetime.now(timezone.utc)
+    if customer is None and normalized_phone:
+        customer = Customer(phone=normalized_phone, name=payload.customer_name.strip(), first_order_at=now, last_order_at=now)
+        db.add(customer)
+        db.flush()
+    elif customer is not None:
+        customer.name = payload.customer_name.strip() or customer.name
+        customer.last_order_at = now
+    order.customer_id = customer.id if customer else None
+
+    # 6) خصم استخدام الكوبون بعد نجاح الحساب.
     if pricing.coupon is not None:
         pricing.coupon.usage_count += 1
         db.add(pricing.coupon)
 
-    # 6) حفظ الطلب أولًا لمعرفة رقمه، ثم بناء رسالة WhatsApp برقم الطلب.
+    # 7) حفظ الطلب أولًا لمعرفة رقمه، ثم بناء رسالة WhatsApp برقم الطلب.
     db.add(order)
     db.flush()
 
@@ -232,7 +249,7 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
         subtotal=pricing.subtotal,
         discount_amount=pricing.discount_amount,
         delivery_fee=pricing.delivery_fee,
-        delivery_name=delivery_option.name if delivery_option else None,
+        delivery_name=(f"{delivery_option.name} - {pricing.delivery_zone.name}" if delivery_option and pricing.delivery_zone else delivery_option.name if delivery_option else None),
         is_pickup=bool(delivery_option and delivery_option.is_pickup),
         total=pricing.total,
         notes=payload.notes,

@@ -193,3 +193,11 @@ def build_whatsapp_url(phone_number: str, message: str) -> str:
         normalized_phone = digits
 
     return f"https://wa.me/{quote(normalized_phone, safe='')}?text={quote(message, safe='')}"
+
+
+def normalize_phone(phone_number: str) -> str:
+    """توحيد الرقم للتجميع ومنع تكرار العميل، مع إبقاء الصفر المحلي كما هو."""
+    digits = re.sub(r"\D", "", phone_number or "")
+    if digits.startswith("00"):
+        digits = digits[2:]
+    return digits

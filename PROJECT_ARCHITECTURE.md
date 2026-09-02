@@ -14,7 +14,7 @@
 
 | التقنية | الملاحظات |
 |----------|-------------|
-| Python | 3.13 (مع المَشاريع) |
+| Python | 3.13.5 |
 | FastAPI | تنفيذ الـREST وWebSocket |
 | SQLAlchemy | ORM و معالجة الجداول |
 | Pydantic | ضغط و validation data |

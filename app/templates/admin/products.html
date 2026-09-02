@@ -10,17 +10,18 @@
 
 <form method="post" enctype="multipart/form-data" class="mb-6 grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-2">
   {{ csrf_field(request) }}
-  <select name="category_id" required class="rounded border px-3 py-2">
+  <label class="text-sm font-semibold">القسم
+  <select name="category_id" required class="mt-1 w-full rounded border px-3 py-2">
     {% for category in categories %}<option value="{{ category.id }}">{{ category.name }}</option>{% endfor %}
-  </select>
-  <input name="name" required class="rounded border px-3 py-2" placeholder="اسم المنتج">
-  <input name="base_price" type="number" step="0.01" min="0.01" required class="rounded border px-3 py-2" placeholder="السعر الأساسي (قبل الخيارات)">
-  <input name="unit" value="piece" class="rounded border px-3 py-2" placeholder="الوحدة">
-  <input name="sort_order" type="number" value="0" class="rounded border px-3 py-2" placeholder="الترتيب">
-  <input name="image" type="file" accept="image/*" class="rounded border px-3 py-2">
-  <textarea name="description" class="rounded border px-3 py-2 md:col-span-2" placeholder="الوصف"></textarea>
-  <label><input name="is_available" type="checkbox" value="true" checked> متوفر</label>
-  <label><input name="is_active" type="checkbox" value="true" checked> ظاهر</label>
+  </select><small class="mt-1 block font-normal text-slate-500">اختر القسم الذي سيظهر فيه الصنف.</small></label>
+  <label class="text-sm font-semibold">اسم المنتج<input name="name" required class="mt-1 w-full rounded border px-3 py-2" placeholder="مثال: كريب بانيه"><small class="mt-1 block font-normal text-slate-500">اكتب الاسم كما سيظهر للعميل.</small></label>
+  <label class="text-sm font-semibold">السعر الأساسي<input name="base_price" type="number" step="0.01" min="0" required class="mt-1 w-full rounded border px-3 py-2" placeholder="0.00"><small class="mt-1 block font-normal text-slate-500">اتركه 0 إذا كان السعر يعتمد على الخيار أو الحجم.</small></label>
+  <label class="text-sm font-semibold">الوحدة<input name="unit" value="قطعة" class="mt-1 w-full rounded border px-3 py-2" placeholder="قطعة، طبق، ساندوتش"><small class="mt-1 block font-normal text-slate-500">وصف طريقة بيع الصنف.</small></label>
+  <label class="text-sm font-semibold">ترتيب الظهور<input name="sort_order" type="number" min="0" value="0" class="mt-1 w-full rounded border px-3 py-2"><small class="mt-1 block font-normal text-slate-500">الأرقام الأصغر تظهر أولاً.</small></label>
+  <label class="text-sm font-semibold">صورة المنتج<input name="image" type="file" accept="image/jpeg,image/png,image/webp" class="mt-1 w-full rounded border px-3 py-2"><small class="mt-1 block font-normal text-slate-500">JPG أو PNG أو WEBP، بحد أقصى 3MB.</small></label>
+  <label class="text-sm font-semibold md:col-span-2">وصف المنتج<textarea name="description" class="mt-1 w-full rounded border px-3 py-2" placeholder="مكونات أو وصف مختصر"></textarea></label>
+  <label><input name="is_available" type="checkbox" value="true" checked> متاح للطلب</label>
+  <label><input name="is_active" type="checkbox" value="true" checked> ظاهر للعميل</label>
   <button class="rounded bg-slate-900 px-4 py-2 font-bold text-white md:col-span-2">إضافة منتج</button>
 </form>
 
@@ -37,7 +38,7 @@
         {% for category in categories %}<option value="{{ category.id }}" {% if product.category_id == category.id %}selected{% endif %}>{{ category.name }}</option>{% endfor %}
       </select>
       <input name="name" value="{{ product.name }}" class="rounded border px-3 py-2">
-      <input name="base_price" type="number" step="0.01" min="0.01" value="{{ product.base_price }}" class="rounded border px-3 py-2">
+      <label class="text-sm font-semibold">السعر الأساسي<input name="base_price" type="number" step="0.01" min="0" value="{{ product.base_price }}" class="mt-1 w-full rounded border px-3 py-2"><small class="font-normal text-slate-500">0 = السعر يحدده الخيار.</small></label>
       <input name="unit" value="{{ product.unit }}" class="rounded border px-3 py-2">
       <input name="sort_order" type="number" value="{{ product.sort_order }}" class="rounded border px-3 py-2">
       <input name="image" type="file" accept="image/*" class="rounded border px-3 py-2">
