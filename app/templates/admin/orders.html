@@ -1,12 +1,22 @@
 {% extends "admin/base.html" %}
 {% block content %}
 <h1 class="mb-5 text-2xl font-bold">الطلبات</h1>
-<form method="get" class="mb-5 grid gap-3 rounded bg-white p-4 shadow-sm sm:grid-cols-4">
+<form method="get" class="mb-5 grid gap-3 rounded bg-white p-4 shadow-sm sm:grid-cols-5">
+	<label class="text-sm font-semibold sm:col-span-2">بحث (رقم الطلب / اسم العميل / الهاتف)<input type="text" name="q" value="{{ q }}" placeholder="مثال: 42 أو أحمد أو 01012345678" class="mt-1 w-full rounded border px-3 py-2"></label>
 	<label class="text-sm font-semibold">من تاريخ<input type="date" name="date_from" value="{{ date_from }}" class="mt-1 w-full rounded border px-3 py-2"></label>
 	<label class="text-sm font-semibold">إلى تاريخ<input type="date" name="date_to" value="{{ date_to }}" class="mt-1 w-full rounded border px-3 py-2"></label>
 	<label class="text-sm font-semibold">الحالة<select name="status_filter" class="mt-1 w-full rounded border px-3 py-2"><option value="">كل الحالات</option>{% for status in statuses %}<option value="{{ status.value }}" {% if status_filter == status.value %}selected{% endif %}>{{ status_labels[status.value] }}</option>{% endfor %}</select></label>
-	<button class="self-end rounded bg-slate-900 px-4 py-2 font-bold text-white">بحث</button>
+	<button class="self-end rounded bg-slate-900 px-4 py-2 font-bold text-white sm:col-span-5 sm:w-auto">بحث</button>
 </form>
 <div class="mb-5 grid gap-3 sm:grid-cols-2"><div class="rounded bg-white p-4 shadow-sm"><span class="text-sm text-slate-500">عدد الطلبات</span><strong class="block text-2xl">{{ orders_count }}</strong></div><div class="rounded bg-white p-4 shadow-sm"><span class="text-sm text-slate-500">إجمالي المبيعات</span><strong class="block text-2xl text-emerald-700">{{ sales_total }}</strong></div></div>
+{% if total_pages and total_pages > 1 %}
+<div class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded bg-white px-4 py-2 text-sm shadow-sm">
+	<span>صفحة {{ page }} من {{ total_pages }}</span>
+	<div class="flex gap-2">
+		{% if page > 1 %}<a class="rounded border px-3 py-1 hover:bg-slate-100" href="?{% if q %}q={{ q }}&{% endif %}{% if status_filter %}status_filter={{ status_filter }}&{% endif %}{% if date_from %}date_from={{ date_from }}&{% endif %}{% if date_to %}date_to={{ date_to }}&{% endif %}page={{ page - 1 }}">السابق</a>{% endif %}
+		{% if page < total_pages %}<a class="rounded border px-3 py-1 hover:bg-slate-100" href="?{% if q %}q={{ q }}&{% endif %}{% if status_filter %}status_filter={{ status_filter }}&{% endif %}{% if date_from %}date_from={{ date_from }}&{% endif %}{% if date_to %}date_to={{ date_to }}&{% endif %}page={{ page + 1 }}">التالي</a>{% endif %}
+	</div>
+</div>
+{% endif %}
 {% include "admin/partials/orders_table.html" %}
 {% endblock %}

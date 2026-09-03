@@ -40,6 +40,7 @@ from app.utils import (
     build_whatsapp_url,
     make_slug,
     normalize_hex_color,
+    normalize_phone,
     parse_theme_colors,
     save_image,
 )
@@ -433,49 +434,109 @@ def delete_product_option(product_id: int, option_id: int, db: Session = Depends
     return redirect(f"/admin/products/{product_id}/options")
 
 
+ORDERS_PAGE_SIZE = 25
+
+
+def _build_orders_base_query(
+    db: Session,
+    status_filter: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    q: Optional[str] = None,
+):
+    statement = select(Order)
+    filters = []
+
+    if status_filter:
+        filters.append(Order.status == status_filter)
+    if date_from:
+        parsed_from = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        filters.append(Order.created_at >= parsed_from)
+    if date_to:
+        parsed_to = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+        filters.append(Order.created_at < parsed_to)
+
+    search_query = (q or "").strip()
+    if search_query:
+        order_id_match: Optional[int] = None
+        if search_query.isdigit() and len(search_query) <= 8:
+            order_id_match = int(search_query)
+
+        search_conditions = []
+        if order_id_match is not None:
+            search_conditions.append(Order.id == order_id_match)
+        search_conditions.append(func.lower(Order.customer_name).like(f"%{search_query.lower()}%"))
+        normalized = normalize_phone(search_query)
+        if normalized:
+            phone_patterns = [f"%{normalized}%"]
+            if normalized.startswith("0") and len(normalized) > 1:
+                phone_patterns.append(f"%{normalized[1:]}%")
+            elif normalized.startswith("20") and len(normalized) > 2:
+                phone_patterns.append(f"%0{normalized[2:]}%")
+            search_conditions.append(or_(*[Order.customer_phone.like(p) for p in phone_patterns]))
+        filters.append(or_(*search_conditions))
+
+    for f in filters:
+        statement = statement.where(f)
+    return statement
+
+
 @router.get("/orders", response_class=HTMLResponse)
 def orders_page(
     request: Request,
     status_filter: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    q: Optional[str] = None,
+    page: int = 1,
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    try:
+        if date_from:
+            datetime.strptime(date_from, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "صيغة التاريخ غير صحيحة")
+    try:
+        if date_to:
+            datetime.strptime(date_to, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "صيغة التاريخ غير صحيحة")
+
+    base_query = _build_orders_base_query(db, status_filter, date_from, date_to, q)
+    base_subquery = base_query.subquery()
+
+    orders_count = db.scalar(select(func.count()).select_from(base_subquery)) or 0
+    sales_total = db.scalar(select(func.coalesce(func.sum(base_subquery.c.total), 0))) or 0
+
+    try:
+        page = max(1, int(page))
+    except (TypeError, ValueError):
+        page = 1
+
+    total_pages = max(1, (orders_count + ORDERS_PAGE_SIZE - 1) // ORDERS_PAGE_SIZE) if orders_count else 1
+    if page > total_pages:
+        page = total_pages
+    offset = (page - 1) * ORDERS_PAGE_SIZE
+
     statement = (
-        select(Order)
+        base_query
         .options(
             selectinload(Order.items).selectinload(OrderItem.addons),
             selectinload(Order.items).selectinload(OrderItem.options),
             selectinload(Order.delivery_option),
             selectinload(Order.coupon),
         )
-        .order_by(Order.created_at.desc())
+        .offset(offset)
+        .limit(ORDERS_PAGE_SIZE)
     )
-    if status_filter:
-        statement = statement.where(Order.status == status_filter)
-    parsed_from = parsed_to = None
-    try:
-        if date_from:
-            parsed_from = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            statement = statement.where(Order.created_at >= parsed_from)
-        if date_to:
-            parsed_to = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
-            statement = statement.where(Order.created_at < parsed_to)
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "صيغة التاريخ غير صحيحة") from exc
     orders = db.scalars(statement).all()
-    summary_statement = select(func.count(Order.id), func.coalesce(func.sum(Order.total), 0))
-    if parsed_from is not None:
-        summary_statement = summary_statement.where(Order.created_at >= parsed_from)
-    if parsed_to is not None:
-        summary_statement = summary_statement.where(Order.created_at < parsed_to)
-    if status_filter:
-        summary_statement = summary_statement.where(Order.status == status_filter)
-    orders_count, sales_total = db.execute(summary_statement).one()
+
+    search_query = (q or "").strip()
     return templates.TemplateResponse(
         "admin/orders.html",
         {"request": request, "orders": orders, "statuses": list(OrderStatus), "status_labels": STATUS_LABELS,
          "status_filter": status_filter, "date_from": date_from or "", "date_to": date_to or "",
+         "q": search_query, "page": page, "total_pages": total_pages,
          "orders_count": orders_count, "sales_total": sales_total},
     )
 
@@ -638,6 +699,43 @@ def export_customers(sort: str = "spent", db: Session = Depends(get_db)) -> Resp
     return Response(
         content="\ufeff" + output.getvalue(), media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": "attachment; filename=customers.csv"},
+    )
+
+
+@router.get("/customers/{customer_id}", response_class=HTMLResponse)
+def customer_detail(request: Request, customer_id: int, db: Session = Depends(get_db)) -> HTMLResponse:
+    customer = db.get(Customer, customer_id)
+    if customer is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer not found")
+
+    orders = db.scalars(
+        select(Order)
+        .where(Order.customer_id == customer_id)
+        .options(
+            selectinload(Order.items).selectinload(OrderItem.addons),
+            selectinload(Order.items).selectinload(OrderItem.options),
+            selectinload(Order.delivery_option),
+            selectinload(Order.coupon),
+        )
+        .order_by(Order.created_at.desc())
+    ).all()
+
+    total_orders = sum(1 for o in orders if o.status != OrderStatus.cancelled.value)
+    total_spent = sum(Decimal(o.total) for o in orders if o.status != OrderStatus.cancelled.value)
+    avg_order = (total_spent / total_orders) if total_orders > 0 else Decimal("0.00")
+
+    return templates.TemplateResponse(
+        "admin/customer_detail.html",
+        {
+            "request": request,
+            "customer": customer,
+            "orders": orders,
+            "total_orders": total_orders,
+            "total_spent": total_spent,
+            "avg_order": avg_order,
+            "status_labels": STATUS_LABELS,
+            "settings": get_or_create_settings(db),
+        },
     )
 
 

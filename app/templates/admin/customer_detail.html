@@ -1,0 +1,85 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <p class="text-sm font-semibold text-emerald-700">تفاصيل العميل</p>
+    <h1 class="text-2xl font-bold">ملف العميل</h1>
+    <p class="mt-1 text-sm text-slate-500">الهاتف: {{ customer.phone }} — التعريف بالرقم الموحد</p>
+  </div>
+  <div>
+    <a href="/admin/customers" class="rounded border px-4 py-2 text-sm font-semibold hover:bg-slate-100">← عودة للعملاء</a>
+  </div>
+</div>
+
+<div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+  <div class="rounded bg-white p-4 shadow-sm">
+    <span class="text-sm text-slate-500">الاسم</span>
+    <strong class="block text-xl">{{ customer.name or "غير مسجل" }}</strong>
+  </div>
+  <div class="rounded bg-white p-4 shadow-sm">
+    <span class="text-sm text-slate-500">رقم الهاتف</span>
+    <strong class="block text-xl">{{ customer.phone }}</strong>
+  </div>
+  <div class="rounded bg-white p-4 shadow-sm">
+    <span class="text-sm text-slate-500">إجمالي الطلبات</span>
+    <strong class="block text-xl">{{ total_orders }}</strong>
+  </div>
+  <div class="rounded bg-white p-4 shadow-sm">
+    <span class="text-sm text-slate-500">إجمالي المشتريات</span>
+    <strong class="block text-xl text-emerald-700">{{ total_spent }} {{ settings.currency }}</strong>
+  </div>
+</div>
+
+<div class="mb-6 grid gap-4 sm:grid-cols-3">
+  <div class="rounded bg-white p-4 shadow-sm">
+    <span class="text-sm text-slate-500">أول طلب</span>
+    <strong class="block text-lg">{{ customer.first_order_at.strftime("%Y-%m-%d %H:%M") }}</strong>
+  </div>
+  <div class="rounded bg-white p-4 shadow-sm">
+    <span class="text-sm text-slate-500">آخر طلب</span>
+    <strong class="block text-lg">{{ customer.last_order_at.strftime("%Y-%m-%d %H:%M") }}</strong>
+  </div>
+  <div class="rounded bg-white p-4 shadow-sm">
+    <span class="text-sm text-slate-500">متوسط قيمة الطلب</span>
+    <strong class="block text-lg text-emerald-700">{{ avg_order }} {{ settings.currency }}</strong>
+  </div>
+</div>
+
+<div class="mb-6 rounded bg-white p-4 shadow-sm">
+  <a href="{{ whatsapp_url(customer.phone) }}" target="_blank" rel="noopener" class="inline-flex rounded bg-[#25D366] px-4 py-2 font-bold text-white">تواصل عبر WhatsApp</a>
+</div>
+
+<div class="rounded bg-white shadow-sm">
+  <div class="border-b border-slate-200 px-4 py-3 text-lg font-bold">تاريخ الطلبات ({{ orders|length }})</div>
+  {% if orders %}
+  <div class="overflow-x-auto">
+    <table class="w-full min-w-[850px] text-sm">
+      <thead class="bg-slate-100 text-right">
+        <tr>
+          <th class="p-3">رقم الطلب</th>
+          <th class="p-3">الحالة</th>
+          <th class="p-3">التاريخ</th>
+          <th class="p-3">الإجمالي</th>
+          <th class="p-3">طريقة الاستلام</th>
+          <th class="p-3">التفاصيل</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for order in orders %}
+        <tr class="border-t">
+          <td class="p-3 font-semibold">#{{ order.id }}</td>
+          <td class="p-3">{{ status_labels[order.status] }}</td>
+          <td class="p-3 text-slate-500">{{ order.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+          <td class="p-3 font-bold">{{ order.total }} {{ settings.currency }}</td>
+          <td class="p-3">{{ order.delivery_option.name if order.delivery_option else "\u2014" }}</td>
+          <td class="p-3 text-slate-500">{{ order.items|length }} منتج</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="p-6 text-center text-slate-500">لا توجد طلبات لهذا العميل.</p>
+  {% endif %}
+</div>
+{% endblock %}

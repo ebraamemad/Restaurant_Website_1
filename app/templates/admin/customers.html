@@ -21,7 +21,7 @@
     <tbody>
       {% for customer, total_orders, total_spent in customers %}
       <tr class="border-t">
-        <td class="p-3 font-semibold">{{ customer.name or "غير مسجل" }}</td>
+        <td class="p-3 font-semibold"><a href="/admin/customers/{{ customer.id }}" class="text-emerald-700 underline hover:text-emerald-900">{{ customer.name or "غير مسجل" }}</a></td>
         <td class="p-3" dir="ltr">{{ customer.phone }}</td>
         <td class="p-3">{{ total_orders }}</td>
         <td class="p-3 font-bold text-emerald-700">{{ total_spent }} {{ settings.currency }}</td>
