@@ -77,7 +77,7 @@ try:
     assert r2.status_code == 200, f"Order 2 failed: {r2.text}"
     order2_id = r2.json()["order_id"]
 
-    customer = db.scalar(select(Customer).where(Customer.phone == phone))
+    customer = db.scalar(select(Customer).where(Customer.phone == "1012345678"))
     assert customer is not None, "Customer should be created"
 
     login_page = client.get("/admin/login")
@@ -87,7 +87,7 @@ try:
 
     detail_page = client.get(f"/admin/customers/{customer.id}")
     assert detail_page.status_code == 200, f"Customer detail page failed: {detail_page.status_code}"
-    assert phone in detail_page.text, "Phone number should be in detail page"
+    assert "1012345678" in detail_page.text, "Phone number should be in detail page"
     assert "عميل المرحلة1" in detail_page.text, "Customer name should be in detail page"
     assert "إجمالي الطلبات" in detail_page.text, "Should show total orders label"
     assert "إجمالي المشتريات" in detail_page.text, "Should show total spent label"

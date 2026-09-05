@@ -253,6 +253,7 @@ class Coupon(Base):
     usage_limit: Mapped[Optional[int]] = mapped_column(Integer)  # عدد الاستخدامات المسموح بها (NULL = غير محدود)
     usage_count: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    first_order_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")  # صالح للطلب الأول فقط (حسب normalized phone)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

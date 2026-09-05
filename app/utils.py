@@ -196,8 +196,17 @@ def build_whatsapp_url(phone_number: str, message: str) -> str:
 
 
 def normalize_phone(phone_number: str) -> str:
-    """توحيد الرقم للتجميع ومنع تكرار العميل، مع إبقاء الصفر المحلي كما هو."""
+    """توحيد الرقم للتجميع ومنع تكرار العميل.
+
+    Egyptian numbers (local 01x or international +20/0020) both normalize to the
+    same 10-digit national format without leading zero (e.g., '1012345678').
+    This ensures consistent customer deduplication regardless of input format.
+    """
     digits = re.sub(r"\D", "", phone_number or "")
     if digits.startswith("00"):
         digits = digits[2:]
+    if digits.startswith("20") and len(digits) > 10:
+        digits = digits[2:]
+    if digits.startswith("0") and len(digits) == 11:
+        digits = digits[1:]
     return digits

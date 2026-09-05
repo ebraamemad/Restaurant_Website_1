@@ -17,6 +17,7 @@
     <input name="end_date" type="datetime-local" required class="mt-1 w-full rounded border px-3 py-2">
   </label>
   <input name="usage_limit" type="number" min="1" class="rounded border px-3 py-2" placeholder="حد الاستخدامات (فاضي = غير محدود)">
+  <label class="flex items-center gap-2 text-sm text-slate-700"><input name="first_order_only" type="checkbox" value="true"> للطلب الأول فقط</label>
   <label><input name="is_active" type="checkbox" value="true" checked> نشط</label>
   <button class="rounded bg-slate-900 px-4 py-2 font-bold text-white md:col-span-2">إضافة كوبون</button>
 </form>
@@ -53,6 +54,7 @@
       <label class="mb-2 block text-sm text-slate-600">حد الاستخدامات
         <input name="usage_limit" type="number" min="1" value="{{ coupon.usage_limit or '' }}" class="mt-1 w-full rounded border px-3 py-2" placeholder="فاضي = غير محدود">
       </label>
+      <label class="mb-3 block"><input name="first_order_only" type="checkbox" value="true" {% if coupon.first_order_only %}checked{% endif %}> للطلب الأول فقط</label>
       <label class="mb-3 block"><input name="is_active" type="checkbox" value="true" {% if coupon.is_active %}checked{% endif %}> نشط</label>
       <button class="rounded bg-emerald-700 px-4 py-2 text-white">حفظ</button>
       <button form="delete-coupon-{{ coupon.id }}" class="rounded bg-red-600 px-4 py-2 text-white">حذف</button>

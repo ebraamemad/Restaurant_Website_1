@@ -169,7 +169,7 @@ def validate_coupon_endpoint(payload: CouponValidateIn, db: Session = Depends(ge
     subtotal = compute_subtotal(lines)
 
     coupon = db.scalar(select(Coupon).where(func.upper(Coupon.code) == payload.code.strip().upper()))
-    reason = coupon_error(coupon, subtotal)
+    reason = coupon_error(coupon, subtotal, customer_phone=payload.customer_phone, db=db)
     if reason is not None:
         return CouponValidateOut(
             valid=False,
@@ -204,10 +204,15 @@ def preview_order(payload: OrderPreviewIn, db: Session = Depends(get_db)) -> Ord
         delivery_option_id=payload.delivery_option_id,
         delivery_zone_id=payload.delivery_zone_id,
         coupon_code=payload.coupon_code if has_coupon else None,
+        customer_phone=payload.customer_phone,
     )
     if has_coupon:
-        coupon_valid = True
-        coupon_message = "الكوبون صالح"
+        if pricing.coupon is not None:
+            coupon_valid = True
+            coupon_message = "الكوبون صالح"
+        else:
+            coupon_valid = False
+            coupon_message = "الكوبون غير صالح"
 
     items_out = [
         OrderPreviewItemOut(

@@ -10,7 +10,7 @@ Create Date: 2026-08-26
 - orders.delivery_option_id: add ON DELETE SET NULL
 - order_item_addons.addon_id: nullable + ON DELETE SET NULL (name/price snapshot keeps history)
 """
-from typing import Sequence, Union
+from typing import List, Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
@@ -22,7 +22,7 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def _fk_constraints(conn, table: str, column: str) -> list[str]:
+def _fk_constraints(conn, table: str, column: str) -> List[str]:
     rows = conn.execute(
         sa.text(
             """

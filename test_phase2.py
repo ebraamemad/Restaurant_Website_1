@@ -50,7 +50,7 @@ try:
     first = client.post("/orders", json=payload)
     second = client.post("/orders", json=payload)
     assert first.status_code == 200 and second.status_code == 200
-    customers = db.scalars(select(Customer).where(Customer.phone == "01099999999")).all()
+    customers = db.scalars(select(Customer).where(Customer.phone == "1099999999")).all()
     assert len(customers) == 1
     assert db.scalar(select(Product).where(Product.id == product.id)).base_price == Decimal("0.00")
     assert client.get("/api/delivery-zones").status_code == 200
@@ -60,7 +60,7 @@ try:
     login = client.post("/admin/login", data={"username": "phase2-admin", "password": "phase2-pass", "csrf_token": csrf}, follow_redirects=False)
     assert login.status_code == 303
     customers_page = client.get("/admin/customers")
-    assert customers_page.status_code == 200 and "01099999999" in customers_page.text
+    assert customers_page.status_code == 200 and "1099999999" in customers_page.text
     export = client.get("/admin/customers/export")
     assert export.status_code == 200 and "رقم الهاتف" in export.text and export.headers["content-type"].startswith("text/csv")
     print("Phase 2: all checks passed")

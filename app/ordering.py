@@ -21,8 +21,8 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Addon, Coupon, DeliveryOption, DeliveryZone, Product, ProductOption, ProductOptionGroup
-from app.utils import ensure_aware
+from app.models import Addon, Coupon, DeliveryOption, DeliveryZone, Order, Product, ProductOption, ProductOptionGroup
+from app.utils import ensure_aware, normalize_phone
 
 if TYPE_CHECKING:
     from app.schemas import CartItemIn
@@ -211,7 +211,13 @@ def compute_subtotal(lines: List[PricedLine]) -> Decimal:
     return quantize_money(sum((line.line_total for line in lines), ZERO))
 
 
-def coupon_error(coupon: Optional[Coupon], subtotal: Decimal, now: Optional[datetime] = None) -> Optional[str]:
+def coupon_error(
+    coupon: Optional[Coupon],
+    subtotal: Decimal,
+    customer_phone: Optional[str] = None,
+    db: Optional[Session] = None,
+    now: Optional[datetime] = None,
+) -> Optional[str]:
     """يعيد سبب رفض الكوبون أو None لو صالح. لا يرمي استثناءات."""
     now = ensure_aware(now or datetime.now(timezone.utc))
     if coupon is None:
@@ -226,6 +232,24 @@ def coupon_error(coupon: Optional[Coupon], subtotal: Decimal, now: Optional[date
         return "تم استنفاد عدد استخدامات هذا الكوبون"
     if subtotal < coupon.minimum_order:
         return f"الحد الأدنى للطلب لاستخدام هذا الكوبون هو {coupon.minimum_order:.2f}"
+    if coupon.first_order_only and db is not None and customer_phone:
+        normalized = normalize_phone(customer_phone)
+        if normalized:
+            db_digits = func.regexp_replace(
+                func.regexp_replace(
+                    func.regexp_replace(Order.customer_phone, r"\D", "", "g"),
+                    r"^0", "",
+                ),
+                r"^20", "",
+            )
+            existing = db.scalar(
+                select(Order.id).where(
+                    db_digits == normalized,
+                    Order.status != "cancelled",
+                )
+            )
+            if existing is not None:
+                return "هذا الكوبون للطلب الأول فقط — لديك طلب سابق"
     return None
 
 
@@ -237,13 +261,18 @@ def calc_coupon_discount(coupon: Coupon, subtotal: Decimal) -> Decimal:
     return quantize_money(discount)
 
 
-def validate_coupon(db: Session, code: str, subtotal: Decimal) -> Tuple[Coupon, Decimal]:
+def validate_coupon(
+    db: Session,
+    code: str,
+    subtotal: Decimal,
+    customer_phone: Optional[str] = None,
+) -> Tuple[Coupon, Decimal]:
     """بحث + تحقق صارم من الكوبون، يرمي 400 برسالة واضحة لو غير صالح."""
-    normalized = (code or "").strip()
-    if not normalized:
+    normalized_code = (code or "").strip()
+    if not normalized_code:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "كود الكوبون مطلوب")
-    coupon = db.scalar(select(Coupon).where(func.upper(Coupon.code) == normalized.upper()))
-    reason = coupon_error(coupon, subtotal)
+    coupon = db.scalar(select(Coupon).where(func.upper(Coupon.code) == normalized_code.upper()))
+    reason = coupon_error(coupon, subtotal, customer_phone, db)
     if reason is not None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, reason)
     return coupon, calc_coupon_discount(coupon, subtotal)
@@ -273,6 +302,7 @@ def compute_pricing(
     delivery_option_id: Optional[int] = None,
     delivery_zone_id: Optional[int] = None,
     coupon_code: Optional[str] = None,
+    customer_phone: Optional[str] = None,
 ) -> PricingResult:
     """الحساب الكامل للطلب من Database: الأسطر + الخصم + الرسوم + الإجمالي."""
     lines = resolve_priced_lines(db, items)
@@ -293,7 +323,7 @@ def compute_pricing(
     coupon: Optional[Coupon] = None
     discount_amount = ZERO
     if coupon_code and coupon_code.strip():
-        coupon, discount_amount = validate_coupon(db, coupon_code, subtotal)
+        coupon, discount_amount = validate_coupon(db, coupon_code, subtotal, customer_phone)
 
     total = quantize_money(subtotal - discount_amount + delivery_fee)
     if total < ZERO:

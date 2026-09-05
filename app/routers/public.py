@@ -7,12 +7,14 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.models import (
     Category,
+    Coupon,
     Customer,
     Order,
     OrderItem,
@@ -154,6 +156,7 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
         delivery_option_id=payload.delivery_option_id,
         delivery_zone_id=payload.delivery_zone_id,
         coupon_code=payload.coupon_code,
+        customer_phone=payload.customer_phone,
     )
 
     # 3) العنوان مطلوب للتوصيل فقط — الاستلام من المطعم لا يحتاج عنوان.
@@ -223,18 +226,47 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
     if customer is None and normalized_phone:
         customer = Customer(phone=normalized_phone, name=payload.customer_name.strip(), first_order_at=now, last_order_at=now)
         db.add(customer)
-        db.flush()
+        try:
+            db.flush()
+        except IntegrityError:
+            db.expire_all()
+            customer = db.scalar(select(Customer).where(Customer.phone == normalized_phone))
+            if customer is None:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "العميل غير موجود")
     elif customer is not None:
         customer.name = payload.customer_name.strip() or customer.name
         customer.last_order_at = now
     order.customer_id = customer.id if customer else None
 
-    # 6) خصم استخدام الكوبون بعد نجاح الحساب.
+    # 6) منع race condition: التحقق من كوبون first-order-only مع قفل العهدة.
+    if pricing.coupon is not None and pricing.coupon.first_order_only:
+        # Lock the Customer row to prevent concurrent first-order coupon usage
+        db.scalar(select(Customer).where(Customer.id == customer.id).with_for_update())
+        # Lock the Coupon row to prevent concurrent first-order-only coupon usage
+        db.scalar(select(Coupon).where(Coupon.id == pricing.coupon.id).with_for_update())
+        from sqlalchemy import func as sa_func
+        db_digits = sa_func.regexp_replace(
+            sa_func.regexp_replace(
+                sa_func.regexp_replace(Order.customer_phone, r"\D", "", "g"),
+                r"^0", "",
+            ),
+            r"^20", "",
+        )
+        existing_order = db.scalar(
+            select(Order.id).where(
+                db_digits == normalized_phone,
+                Order.status != "cancelled",
+            )
+        )
+        if existing_order is not None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "هذا الكوبون للطلب الأول فقط — لديك طلب سابق")
+
+    # 7) خصم استخدام الكوبون بعد نجاح الحساب.
     if pricing.coupon is not None:
         pricing.coupon.usage_count += 1
         db.add(pricing.coupon)
 
-    # 7) حفظ الطلب أولًا لمعرفة رقمه، ثم بناء رسالة WhatsApp برقم الطلب.
+    # 8) حفظ الطلب أولًا لمعرفة رقمه، ثم بناء رسالة WhatsApp برقم الطلب.
     db.add(order)
     db.flush()
 

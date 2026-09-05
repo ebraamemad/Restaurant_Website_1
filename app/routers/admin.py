@@ -583,6 +583,7 @@ def save_coupon(
     end_date: datetime = Form(...),
     usage_limit_raw: Optional[str] = Form(default=None, alias="usage_limit"),
     is_active: bool = Form(default=False),
+    first_order_only: bool = Form(default=False),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     normalized_code = code.strip().upper()
@@ -623,6 +624,7 @@ def save_coupon(
     coupon.end_date = end_date
     coupon.usage_limit = usage_limit
     coupon.is_active = is_active
+    coupon.first_order_only = first_order_only
     db.add(coupon)
     db.commit()
     return redirect("/admin/coupons")

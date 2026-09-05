@@ -147,11 +147,13 @@ class OrderPreviewIn(BaseModel):
     delivery_option_id: Optional[int] = Field(default=None, gt=0)
     delivery_zone_id: Optional[int] = Field(default=None, gt=0)
     coupon_code: Optional[str] = Field(default=None, max_length=50)
+    customer_phone: Optional[str] = Field(default=None, max_length=30)
 
 
 class CouponValidateIn(BaseModel):
     code: str = Field(min_length=1, max_length=50)
     items: List[CartItemIn] = Field(min_length=1)
+    customer_phone: Optional[str] = Field(default=None, max_length=30)
 
 
 class CouponValidateOut(BaseModel):
