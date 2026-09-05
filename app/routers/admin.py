@@ -92,17 +92,152 @@ def get_or_create_settings(db: Session) -> RestaurantSettings:
 def get_dashboard_stats(db: Session):
     top_products = db.execute(
         select(OrderItem.product_name, func.sum(OrderItem.quantity))
+        .join(Order, OrderItem.order_id == Order.id)
+        .where(Order.status != OrderStatus.cancelled.value)
         .group_by(OrderItem.product_name)
         .order_by(func.sum(OrderItem.quantity).desc(), OrderItem.product_name)
         .limit(5)
     ).all()
     top_customers = db.execute(
-        select(Order.customer_phone, func.count(Order.id))
+        select(Order.customer_phone, func.count(Order.id), func.coalesce(func.sum(Order.total), 0))
+        .where(Order.status != OrderStatus.cancelled.value)
         .group_by(Order.customer_phone)
         .order_by(func.count(Order.id).desc(), Order.customer_phone)
         .limit(5)
     ).all()
     return top_products, top_customers
+
+
+def dashboard_analytics(
+    db: Session,
+    start_dt: Optional[datetime] = None,
+    end_dt: Optional[datetime] = None,
+):
+    """يحسب إحصائيات الـDashboard لفترة محددة (مستبعدة طلبات cancelled).
+
+    لو start_dt و end_dt = None يرجع الإحصائيات الإجمالية (بدون فلتر تاريخ).
+    """
+    valid_order = Order.status != OrderStatus.cancelled.value
+    date_filter = []
+    if start_dt is not None:
+        date_filter.append(Order.created_at >= start_dt)
+    if end_dt is not None:
+        date_filter.append(Order.created_at < end_dt)
+
+    def _apply_date(stmt):
+        if date_filter:
+            stmt = stmt.where(*date_filter)
+        return stmt
+
+    totals_stmt = _apply_date(
+        select(
+            func.count(Order.id),
+            func.coalesce(func.sum(Order.total), 0),
+        ).where(valid_order)
+    )
+    total_orders, total_revenue = db.execute(totals_stmt).one()
+    total_orders = int(total_orders or 0)
+    total_revenue = Decimal(total_revenue or 0)
+    aov = (total_revenue / Decimal(total_orders)) if total_orders else Decimal("0")
+
+    distinct_customers_stmt = _apply_date(
+        select(func.count(distinct(Order.customer_id))).where(
+            valid_order, Order.customer_id.is_not(None)
+        )
+    )
+    distinct_customers = int(db.scalar(distinct_customers_stmt) or 0)
+
+    if start_dt is None:
+        total_customers = int(db.scalar(select(func.count(Customer.id))) or 0)
+        new_customers = total_customers
+        returning_customers = 0
+    else:
+        new_customers = int(
+            db.scalar(
+                select(func.count(Customer.id)).where(Customer.first_order_at >= start_dt)
+            ) or 0
+        )
+        returning_customers = max(distinct_customers - new_customers, 0)
+
+    pickup_stmt = _apply_date(
+        select(func.count(Order.id))
+        .join(DeliveryOption, Order.delivery_option_id == DeliveryOption.id)
+        .where(valid_order, DeliveryOption.is_pickup.is_(True))
+    )
+    delivery_stmt = _apply_date(
+        select(func.count(Order.id))
+        .join(DeliveryOption, Order.delivery_option_id == DeliveryOption.id)
+        .where(valid_order, DeliveryOption.is_pickup.is_(False))
+    )
+    pickup_orders = int(db.scalar(pickup_stmt) or 0)
+    delivery_orders = int(db.scalar(delivery_stmt) or 0)
+
+    coupon_orders_stmt = _apply_date(
+        select(func.count(Order.id)).where(valid_order, Order.coupon_id.is_not(None))
+    )
+    coupon_orders = int(db.scalar(coupon_orders_stmt) or 0)
+
+    top_products_stmt = _apply_date(
+        select(
+            OrderItem.product_name,
+            func.sum(OrderItem.quantity),
+            func.coalesce(func.sum(OrderItem.line_total), 0),
+        )
+        .join(Order, OrderItem.order_id == Order.id)
+        .where(valid_order)
+        .group_by(OrderItem.product_name)
+        .order_by(func.sum(OrderItem.quantity).desc(), OrderItem.product_name)
+        .limit(5)
+    )
+    top_products = db.execute(top_products_stmt).all()
+
+    top_coupons_stmt = _apply_date(
+        select(
+            Coupon.code,
+            func.count(Order.id),
+        )
+        .join(Order, Order.coupon_id == Coupon.id)
+        .where(valid_order, Order.coupon_id.is_not(None))
+        .group_by(Coupon.code)
+        .order_by(func.count(Order.id).desc(), Coupon.code)
+        .limit(5)
+    )
+    top_coupons = db.execute(top_coupons_stmt).all()
+
+    return {
+        "total_orders": total_orders,
+        "total_revenue": total_revenue,
+        "aov": aov,
+        "active_customers": distinct_customers,
+        "new_customers": new_customers,
+        "returning_customers": returning_customers,
+        "pickup_orders": pickup_orders,
+        "delivery_orders": delivery_orders,
+        "coupon_orders": coupon_orders,
+        "top_products": top_products,
+        "top_coupons": top_coupons,
+    }
+
+
+def parse_dashboard_range(request: Request) -> tuple[Optional[datetime], Optional[datetime], str]:
+    """يدعم range: today / 7d / 30d / all + تواريخ مخصصة from/to."""
+    range_value = (request.query_params.get("range") or "all").lower().strip()
+    if range_value not in {"today", "7d", "30d", "all"}:
+        range_value = "all"
+    now = datetime.now()
+    if range_value == "today":
+        start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_dt = start_dt + timedelta(days=1)
+    elif range_value == "7d":
+        start_dt = now - timedelta(days=7)
+        end_dt = now + timedelta(days=1)
+    elif range_value == "30d":
+        start_dt = now - timedelta(days=30)
+        end_dt = now + timedelta(days=1)
+    else:
+        start_dt = None
+        end_dt = None
+    return start_dt, end_dt, range_value
 
 
 def customer_rows(db: Session, sort: str = "spent"):
@@ -125,32 +260,35 @@ def customer_rows(db: Session, sort: str = "spent"):
 
 @router.get("", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(get_current_admin)) -> HTMLResponse:
-    now = datetime.now()
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_dt, end_dt, range_value = parse_dashboard_range(request)
+    analytics = dashboard_analytics(db, start_dt, end_dt)
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today_start - timedelta(days=today_start.weekday())
     month_start = today_start.replace(day=1)
-    delivered_sales = db.scalar(select(func.coalesce(func.sum(Order.total), 0)).where(Order.status == OrderStatus.delivered.value)) or Decimal("0")
-    top_products, top_customers = get_dashboard_stats(db)
+    latest_orders_query = (
+        select(Order)
+        .options(
+            selectinload(Order.items).selectinload(OrderItem.addons),
+            selectinload(Order.items).selectinload(OrderItem.options),
+            selectinload(Order.delivery_option),
+            selectinload(Order.coupon),
+        )
+        .order_by(Order.created_at.desc())
+        .limit(8)
+    )
+    if start_dt is not None:
+        latest_orders_query = latest_orders_query.where(Order.created_at >= start_dt)
+        if end_dt is not None:
+            latest_orders_query = latest_orders_query.where(Order.created_at < end_dt)
+    latest_orders = db.scalars(latest_orders_query).all()
+    _, top_customers = get_dashboard_stats(db)
     context = {
         "request": request,
         "admin": admin,
-        "today_orders": db.scalar(select(func.count(Order.id)).where(Order.created_at >= today_start)),
-        "week_orders": db.scalar(select(func.count(Order.id)).where(Order.created_at >= week_start)),
-        "month_orders": db.scalar(select(func.count(Order.id)).where(Order.created_at >= month_start)),
-        "total_sales": delivered_sales,
-        "customers_count": db.scalar(select(func.count(distinct(Order.customer_phone)))),
-        "latest_orders": db.scalars(
-            select(Order)
-            .options(
-                selectinload(Order.items).selectinload(OrderItem.addons),
-                selectinload(Order.items).selectinload(OrderItem.options),
-                selectinload(Order.delivery_option),
-                selectinload(Order.coupon),
-            )
-            .order_by(Order.created_at.desc())
-            .limit(8)
-        ).all(),
-        "top_products": top_products,
+        "settings": get_or_create_settings(db),
+        "range_value": range_value,
+        "analytics": analytics,
+        "latest_orders": latest_orders,
         "top_customers": top_customers,
         "status_labels": STATUS_LABELS,
     }
