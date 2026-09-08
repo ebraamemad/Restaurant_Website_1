@@ -18,6 +18,16 @@
             loading="lazy"
             decoding="async">
 
+        {% if product.is_offer %}
+
+        <span class="absolute top-1.5 left-1.5 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm sm:text-xs">
+
+            عرض
+
+        </span>
+
+        {% endif %}
+
         {% if has_options %}
 
         <span class="absolute top-1.5 right-1.5 rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-bold text-primary shadow-sm backdrop-blur sm:text-xs">

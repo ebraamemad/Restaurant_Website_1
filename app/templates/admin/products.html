@@ -22,6 +22,8 @@
   <label class="text-sm font-semibold md:col-span-2">وصف المنتج<textarea name="description" class="mt-1 w-full rounded border px-3 py-2" placeholder="مكونات أو وصف مختصر"></textarea></label>
   <label><input name="is_available" type="checkbox" value="true" checked> متاح للطلب</label>
   <label><input name="is_active" type="checkbox" value="true" checked> ظاهر للعميل</label>
+  <label><input name="is_featured" type="checkbox" value="true"> مميز</label>
+  <label><input name="is_offer" type="checkbox" value="true"> عرض</label>
   <button class="rounded bg-slate-900 px-4 py-2 font-bold text-white md:col-span-2">إضافة منتج</button>
 </form>
 
@@ -57,6 +59,8 @@
       <textarea name="description" class="rounded border px-3 py-2 md:col-span-6" placeholder="الوصف">{{ product.description or "" }}</textarea>
       <label><input name="is_available" type="checkbox" value="true" {% if product.is_available %}checked{% endif %}> متوفر</label>
       <label><input name="is_active" type="checkbox" value="true" {% if product.is_active %}checked{% endif %}> ظاهر</label>
+      <label><input name="is_featured" type="checkbox" value="true" {% if product.is_featured %}checked{% endif %}> مميز</label>
+      <label><input name="is_offer" type="checkbox" value="true" {% if product.is_offer %}checked{% endif %}> عرض</label>
       <button class="rounded bg-emerald-700 px-4 py-2 text-white">حفظ</button>
       <a href="/admin/products/{{ product.id }}/options" class="rounded bg-indigo-600 px-4 py-2 text-white">الخيارات</a>
       <a href="/admin/products/{{ product.id }}/addons" class="rounded bg-slate-600 px-4 py-2 text-white">الإضافات</a>

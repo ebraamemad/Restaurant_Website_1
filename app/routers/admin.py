@@ -308,7 +308,6 @@ async def save_category(
     description: Optional[str] = Form(default=None),
     sort_order: int = Form(default=0),
     is_active: bool = Form(default=False),
-    is_featured: bool = Form(default=False),
     image: Optional[UploadFile] = File(default=None),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
@@ -320,7 +319,6 @@ async def save_category(
     category.description = description
     category.sort_order = sort_order
     category.is_active = is_active
-    category.is_featured = is_featured
     if image and image.filename:
         category.image_url = await save_image(image, UPLOADS_DIR / "categories")
     db.add(category)
@@ -370,6 +368,8 @@ async def save_product(
     sort_order: int = Form(default=0),
     is_available: bool = Form(default=False),
     is_active: bool = Form(default=False),
+    is_featured: bool = Form(default=False),
+    is_offer: bool = Form(default=False),
     image: Optional[UploadFile] = File(default=None),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
@@ -389,6 +389,8 @@ async def save_product(
     product.sort_order = sort_order
     product.is_available = is_available
     product.is_active = is_active
+    product.is_featured = is_featured
+    product.is_offer = is_offer
     if image and image.filename:
         product.image_url = await save_image(image, UPLOADS_DIR / "products")
     db.add(product)

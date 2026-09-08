@@ -1,12 +1,6 @@
 {% set ns = namespace(featured=[]) %}
-{% for category in categories %}
-    {% if category.is_featured %}
-        {% for product in category.products %}
-            {% if product.is_active and product.is_available %}
-                {% set ns.featured = ns.featured + [product] %}
-            {% endif %}
-        {% endfor %}
-    {% endif %}
+{% for product in products if product.is_featured and product.is_active and product.is_available %}
+    {% set ns.featured = ns.featured + [product] %}
 {% endfor %}
 {% if not ns.featured %}
     {% for product in products if product.is_active and product.is_available and product.image_url %}
@@ -28,7 +22,7 @@
     <div class="mb-3 flex items-center justify-between sm:mb-4">
 
         <h2 class="flex items-center gap-2 text-xl font-extrabold sm:text-2xl">
-            ⭐ الأهم عندنا
+            ⭐ المميزة
         </h2>
 
         <div class="flex gap-2">
@@ -69,12 +63,26 @@
 
             {% if product.image_url %}
 
-            <img
-                src="{{ product.image_url }}"
-                alt="{{ product.name }}"
-                class="h-28 w-full object-cover transition duration-300 group-hover:scale-[1.03] sm:h-36"
-                loading="lazy"
-                decoding="async">
+            <div class="relative">
+
+                <img
+                    src="{{ product.image_url }}"
+                    alt="{{ product.name }}"
+                    class="h-28 w-full object-cover transition duration-300 group-hover:scale-[1.03] sm:h-36"
+                    loading="lazy"
+                    decoding="async">
+
+                {% if product.is_offer %}
+
+                <span class="absolute top-1 left-1 rounded-full bg-red-500 px-1.5 py-0.5 text-[8px] font-bold text-white sm:text-[10px]">
+
+                    عرض
+
+                </span>
+
+                {% endif %}
+
+            </div>
 
             {% else %}
 

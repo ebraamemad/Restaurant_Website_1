@@ -20,7 +20,6 @@ class CategoryForm(BaseModel):
     description: Optional[str] = Field(default=None, max_length=1000)
     sort_order: int = Field(default=0, ge=0)
     is_active: bool = True
-    is_featured: bool = False
 
 
 class ProductForm(BaseModel):
@@ -32,6 +31,8 @@ class ProductForm(BaseModel):
     sort_order: int = Field(default=0, ge=0)
     is_available: bool = True
     is_active: bool = True
+    is_featured: bool = False
+    is_offer: bool = False
 
 
 class SettingsForm(BaseModel):
@@ -140,7 +141,7 @@ class CategoryOut(BaseModel):
     slug: str
     description: Optional[str]
     image_url: Optional[str]
-    is_featured: bool
+    is_active: bool
 
 
 class OrderPreviewIn(BaseModel):
@@ -211,6 +212,8 @@ class ProductDetailOut(BaseModel):
     image_url: Optional[str]
     is_available: bool
     is_active: bool
+    is_featured: bool = False
+    is_offer: bool = False
     category: Optional[CategoryOut] = None
     options: List[ProductOptionOut] = []
     option_groups: List[OptionGroupOut] = []
@@ -235,6 +238,9 @@ class ProductOut(BaseModel):
     description: Optional[str]
     image_url: Optional[str]
     is_available: bool
+    is_active: bool
+    is_featured: bool = False
+    is_offer: bool = False
     category: Optional[CategoryOut] = None
 
 

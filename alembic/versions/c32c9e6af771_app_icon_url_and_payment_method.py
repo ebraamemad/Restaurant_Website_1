@@ -20,7 +20,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.add_column('restaurant_settings', sa.Column('app_icon_url', sa.String(length=500), nullable=True))
+    op.add_column('products', sa.Column('is_featured', sa.Boolean(), nullable=True, server_default=sa.false()))
+    op.add_column('products', sa.Column('is_offer', sa.Boolean(), nullable=True, server_default=sa.false()))
+    op.drop_column('categories', 'is_featured')
 
 
 def downgrade() -> None:
+    op.drop_column('products', 'is_offer')
+    op.drop_column('products', 'is_featured')
     op.drop_column('restaurant_settings', 'app_icon_url')
