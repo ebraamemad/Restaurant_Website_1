@@ -65,6 +65,36 @@ def home(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     )
 
 
+@router.get("/manifest.json")
+def get_manifest(db: Session = Depends(get_db)) -> dict:
+    settings = get_settings(db)
+    theme = parse_theme_colors(settings)
+    if settings.app_icon_url:
+        icons = [
+            {"src": settings.app_icon_url, "sizes": "192x192", "type": "image/png"},
+            {"src": settings.app_icon_url, "sizes": "512x512", "type": "image/png"},
+        ]
+    else:
+        icons = [
+            {"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+        ]
+    return {
+        "name": settings.restaurant_name or "Restaurant Ordering",
+        "short_name": settings.restaurant_name or "Restaurant",
+        "description": settings.description or "نظام طلب إلكتروني للمطعم",
+        "start_url": "/",
+        "scope": "/",
+        "lang": "ar",
+        "dir": "rtl",
+        "display": "standalone",
+        "background_color": "#f8fafc",
+        "theme_color": theme["primary"],
+        "orientation": "portrait",
+        "icons": icons,
+    }
+
+
 @router.get("/search", response_class=HTMLResponse)
 def search_products(request: Request, q: str = "", db: Session = Depends(get_db)) -> HTMLResponse:
     restaurant_settings = get_settings(db)
@@ -181,6 +211,7 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
         delivery_zone_id=pricing.delivery_zone.id if pricing.delivery_zone else None,
         coupon_id=pricing.coupon.id if pricing.coupon else None,
         pickup_time=scheduled_time,
+        payment_method=payload.payment_method,
     )
 
     message_items: List[dict] = []
@@ -287,6 +318,7 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
         notes=payload.notes,
         pickup_time=scheduled_time,
         coupon_code=pricing.coupon_code,
+        payment_method=payload.payment_method,
     )
     order.whatsapp_message = message
 

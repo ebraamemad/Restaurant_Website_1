@@ -42,6 +42,14 @@
     <input name="banner" type="file" accept="image/*" class="mt-1 w-full rounded border px-3 py-2">
     {% if settings.banner_url %}<img src="{{ settings.banner_url }}" class="mt-2 h-16 w-40 rounded-lg border object-cover" alt="البنر الحالي">{% endif %}
   </label>
+  <label class="text-sm font-semibold">أيقونة التطبيق (PWA)
+    <input name="app_icon" type="file" accept="image/*" class="mt-1 w-full rounded border px-3 py-2">
+    {% if settings.app_icon_url %}
+      <img src="{{ settings.app_icon_url }}" class="mt-2 h-16 w-16 rounded-lg border object-cover" alt="أيقونة التطبيق الحالية">
+    {% else %}
+      <img src="/static/icons/icon-192.png" class="mt-2 h-16 w-16 rounded-lg border object-cover opacity-50" alt="الأيقونة الافتراضية">
+    {% endif %}
+  </label>
 
   <h2 class="mt-2 text-lg font-bold md:col-span-2">معلومات أسفل الموقع (Footer)</h2>
   <textarea name="additional_info" rows="3" class="rounded border px-3 py-2 md:col-span-2" placeholder="نص معلومات عن المطعم يظهر أسفل الموقع">{{ settings.additional_info or "" }}</textarea>

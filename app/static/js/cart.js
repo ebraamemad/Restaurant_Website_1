@@ -69,6 +69,7 @@ function storeCart() {
     couponCode: "",
     couponValid: null,
     couponMessage: "",
+    selectedPaymentMethod: "cash",
     preview: { subtotal: 0, discount_amount: 0, delivery_fee: 0, total: 0 },
     previewLoading: false,
     _previewSeq: 0,
@@ -310,6 +311,7 @@ function storeCart() {
             delivery_zone_id: this.isPickup() ? null : this.selectedZoneId,
             coupon_code: this.couponCode.trim() || null,
             pickup_time: pickupTime,
+            payment_method: this.selectedPaymentMethod,
             items: this.mappedItems(),
           }),
         });

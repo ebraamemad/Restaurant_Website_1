@@ -18,6 +18,12 @@ from app.models import RestaurantSettings
 ALLOWED_IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 MAX_IMAGE_SIZE = 3 * 1024 * 1024
 
+PAYMENT_METHOD_LABELS = {
+    "cash": "كاش",
+    "ewallet": "محفظة إلكترونية",
+    "card": "فيزا",
+}
+
 
 def make_slug(value: str, fallback: str = "item") -> str:
     slug = slugify(value, lowercase=True, separator="-")
@@ -125,6 +131,7 @@ def build_whatsapp_message(
     notes: Optional[str],
     pickup_time: Optional[datetime] = None,
     coupon_code: Optional[str] = None,
+    payment_method: Optional[str] = None,
 ) -> str:
     """يبني رسالة واتساب منظمة. كل عنصر في items هو dict بالحقول:
     name, quantity, line_total, options [(name, price_adjustment)], addons [(name, price)], note.
@@ -144,6 +151,8 @@ def build_whatsapp_message(
         lines.append(f"موعد الطلب: {ensure_aware(pickup_time).astimezone().strftime('%Y-%m-%d %H:%M')}")
     else:
         lines.append("موعد الطلب: في أقرب وقت")
+    if payment_method:
+        lines.append(f"طريقة الدفع: {PAYMENT_METHOD_LABELS.get(payment_method, payment_method)}")
 
     lines.extend(["", "المنتجات:"])
     for item in items:

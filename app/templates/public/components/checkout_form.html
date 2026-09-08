@@ -95,6 +95,31 @@
                 <span>الإجمالي</span><span x-text="formatPrice(preview.total)"></span></div>
         </div>
 
+        <!-- طريقة الدفع -->
+        <div>
+            <p class="mb-2 text-sm font-bold">طريقة الدفع</p>
+            <div class="grid grid-cols-3 gap-2">
+                <label
+                    class="touch-target flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border p-2 text-center transition"
+                    :class="selectedPaymentMethod === 'cash' ? 'border-primary bg-primary/5' : 'border-slate-200'">
+                    <input type="radio" name="payment_method" value="cash" x-model="selectedPaymentMethod" class="sr-only">
+                    <span class="text-sm font-bold">كاش</span>
+                </label>
+                <label
+                    class="touch-target flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border p-2 text-center transition"
+                    :class="selectedPaymentMethod === 'ewallet' ? 'border-primary bg-primary/5' : 'border-slate-200'">
+                    <input type="radio" name="payment_method" value="ewallet" x-model="selectedPaymentMethod" class="sr-only">
+                    <span class="text-sm font-bold">محفظة إلكترونية</span>
+                </label>
+                <label
+                    class="touch-target flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border p-2 text-center transition"
+                    :class="selectedPaymentMethod === 'card' ? 'border-primary bg-primary/5' : 'border-slate-200'">
+                    <input type="radio" name="payment_method" value="card" x-model="selectedPaymentMethod" class="sr-only">
+                    <span class="text-sm font-bold">فيزا</span>
+                </label>
+            </div>
+        </div>
+
         <button
             :disabled="items.length===0||loading"
             class="touch-target flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 font-bold text-white transition hover:bg-secondary disabled:opacity-50 active:scale-[0.98]">

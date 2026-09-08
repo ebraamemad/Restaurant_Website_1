@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -74,6 +74,7 @@ class OrderCreate(BaseModel):
     delivery_zone_id: Optional[int] = Field(default=None, gt=0)
     coupon_code: Optional[str] = Field(default=None, max_length=50)
     pickup_time: Optional[datetime] = None
+    payment_method: Literal["cash", "ewallet", "card"] = "cash"
 
 
 class OrderCreated(BaseModel):

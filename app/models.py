@@ -100,6 +100,7 @@ class Order(Base):
     coupon_id: Mapped[Optional[int]] = mapped_column(ForeignKey("coupons.id", ondelete="SET NULL"), index=True)
     customer_id: Mapped[Optional[int]] = mapped_column(ForeignKey("customers.id", ondelete="SET NULL"), index=True)
     pickup_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    payment_method: Mapped[Optional[str]] = mapped_column(String(20))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -168,6 +169,7 @@ class RestaurantSettings(Base):
     address: Mapped[Optional[str]] = mapped_column(String(300))
     logo_url: Mapped[Optional[str]] = mapped_column(String(500))
     banner_url: Mapped[Optional[str]] = mapped_column(String(500))
+    app_icon_url: Mapped[Optional[str]] = mapped_column(String(500))
     working_hours: Mapped[Optional[str]] = mapped_column(String(250))
     currency: Mapped[str] = mapped_column(String(10), default="EGP")
     facebook_url: Mapped[Optional[str]] = mapped_column(String(500))

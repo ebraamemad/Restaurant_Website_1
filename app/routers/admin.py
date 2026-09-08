@@ -273,7 +273,6 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin: Admin = De
             selectinload(Order.delivery_option),
             selectinload(Order.coupon),
         )
-        .where(Order.status != OrderStatus.cancelled.value)
         .order_by(Order.created_at.desc())
         .limit(8)
     )
@@ -643,11 +642,9 @@ def orders_page(
 
     base_query = _build_orders_base_query(db, status_filter, date_from, date_to, q)
     base_subquery = base_query.subquery()
-    stats_base = base_subquery
-    if not status_filter:
-        stats_base = select(base_subquery).where(base_subquery.c.status != OrderStatus.cancelled.value).subquery()
-    orders_count = db.scalar(select(func.count()).select_from(stats_base)) or 0
-    sales_total = db.scalar(select(func.coalesce(func.sum(stats_base.c.total), 0))) or 0
+
+    orders_count = db.scalar(select(func.count()).select_from(base_subquery)) or 0
+    sales_total = db.scalar(select(func.coalesce(func.sum(base_subquery.c.total), 0))) or 0
 
     try:
         page = max(1, int(page))
@@ -944,6 +941,7 @@ async def save_settings(
     accent_color: Optional[str] = Form(default=None),
     logo: Optional[UploadFile] = File(default=None),
     banner: Optional[UploadFile] = File(default=None),
+    app_icon: Optional[UploadFile] = File(default=None),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     theme = dict(THEME_DEFAULTS)
@@ -976,5 +974,7 @@ async def save_settings(
         settings.logo_url = await save_image(logo, UPLOADS_DIR / "logos")
     if banner and banner.filename:
         settings.banner_url = await save_image(banner, UPLOADS_DIR / "banners")
+    if app_icon and app_icon.filename:
+        settings.app_icon_url = await save_image(app_icon, UPLOADS_DIR / "icons")
     db.commit()
     return redirect("/admin/settings")

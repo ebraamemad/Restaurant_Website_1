@@ -1,6 +1,5 @@
 const CACHE_NAME = 'restaurant-cache-v1';
 const STATIC_ASSETS = [
-  '/static/manifest.json',
   '/static/css/app.css',
   '/static/js/cart.js',
   '/static/icons/icon-192.png',
@@ -27,8 +26,7 @@ self.addEventListener('fetch', (event) => {
     request.method === 'GET' &&
     (request.destination === 'style' ||
       request.destination === 'script' ||
-      request.destination === 'image' ||
-      request.destination === 'manifest');
+      request.destination === 'image');
 
   if (!isStaticAsset) {
     return;

@@ -14,7 +14,7 @@ content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="mobile-web-app-capable" content="yes">
-<link rel="manifest" href="/static/manifest.json">
+<link rel="manifest" href="/manifest.json">
 <link rel="icon" href="/static/favicon.png" type="image/png">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
 
@@ -99,14 +99,6 @@ style="background: radial-gradient(circle at top, color-mix(in srgb, {{ theme.pr
 
 {% endblock %}
 
-<div id="offline-status" class="fixed inset-0 z-[100] hidden items-center justify-center bg-slate-950/85 p-4 text-center text-white">
-  <div class="rounded-3xl border border-white/15 bg-white/10 px-5 py-6 shadow-2xl backdrop-blur">
-    <div class="mb-3 text-4xl">📡</div>
-    <h2 class="text-lg font-bold">لا يوجد اتصال بالإنترنت</h2>
-    <p class="mt-2 text-sm text-slate-200">ستظهر الصفحة عند عودة الاتصال.</p>
-  </div>
-</div>
-
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -114,18 +106,54 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-const offlineStatus = document.getElementById('offline-status');
-const updateOfflineState = () => {
-  if (!offlineStatus) return;
-  const isOffline = !navigator.onLine;
-  offlineStatus.classList.toggle('hidden', !isOffline);
-  offlineStatus.classList.toggle('flex', isOffline);
-};
+const isPWAInstalled = () =>
+  window.matchMedia('(display-mode: standalone)').matches ||
+  window.navigator.standalone === true;
 
-window.addEventListener('online', updateOfflineState);
-window.addEventListener('offline', updateOfflineState);
-updateOfflineState();
+window.addEventListener('beforeinstallprompt', (e) => {
+  if (isPWAInstalled()) return;
+  e.preventDefault();
+  window.deferredPrompt = e;
+  const banner = document.getElementById('pwa-install-banner');
+  if (banner) {
+    banner.classList.remove('hidden');
+    banner.classList.add('flex');
+  }
+});
+
+window.addEventListener('appinstalled', () => {
+  window.deferredPrompt = null;
+  const banner = document.getElementById('pwa-install-banner');
+  if (banner) {
+    banner.classList.add('hidden');
+    banner.classList.remove('flex');
+  }
+});
+
+function dismissPWAInstall() {
+  const banner = document.getElementById('pwa-install-banner');
+  if (banner) {
+    banner.classList.add('hidden');
+    banner.classList.remove('flex');
+  }
+}
+
+async function installPWA() {
+  if (!window.deferredPrompt) return;
+  window.deferredPrompt.prompt();
+  const { outcome } = await window.deferredPrompt.userChoice;
+  window.deferredPrompt = null;
+  dismissPWAInstall();
+}
 </script>
+
+<div id="pwa-install-banner" class="fixed bottom-0 left-0 right-0 z-50 hidden flex-col items-center gap-3 bg-white p-4 shadow-[0_-4px_20px_rgba(0,0,0,0.15)]" style="display:none">
+  <p class="text-sm font-semibold">أضف التطبيق إلى شاشتك الرئيسية</p>
+  <div class="flex gap-3">
+    <button onclick="installPWA()" class="rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-bold text-white">ثبّت التطبيق</button>
+    <button onclick="dismissPWAInstall()" class="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-600">لاحقًا</button>
+  </div>
+</div>
 
 </body>
 
