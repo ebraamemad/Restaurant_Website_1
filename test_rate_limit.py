@@ -74,7 +74,7 @@ if __name__ == "__main__":
     p = Product(category_id=cat.id, name="RL Product", slug=f"rl-product-{unique_id}", base_price=Decimal("100"), is_active=True, is_available=True)
     db.add(p)
     db.flush()
-    d = DeliveryOption(name="توصيل", fee=Decimal("10"), is_pickup=False, is_active=True)
+    d = DeliveryOption(name="توصيل", fee=Decimal("10"), delivery_type="fixed", is_active=True)
     db.add(d)
     db.flush()
     dz = DeliveryZone(name="منطقة RL", fee=Decimal("10"), is_active=True)

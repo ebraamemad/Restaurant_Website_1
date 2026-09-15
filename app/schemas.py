@@ -97,7 +97,8 @@ class DeliveryOptionOut(BaseModel):
     description: Optional[str]
     fee: Decimal
     estimated_time: Optional[str]
-    is_pickup: bool
+    delivery_type: str  # pickup | fixed | zone
+    is_active: bool
 
 
 class DeliveryZoneOut(BaseModel):

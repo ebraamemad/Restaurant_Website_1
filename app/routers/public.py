@@ -192,7 +192,7 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
     # 3) العنوان مطلوب للتوصيل فقط — الاستلام من المطعم لا يحتاج عنوان.
     address = (payload.customer_address or "").strip() or None
     delivery_option = pricing.delivery_option
-    if delivery_option is not None and not delivery_option.is_pickup and not address:
+    if delivery_option is not None and delivery_option.delivery_type != "pickup" and not address:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "العنوان مطلوب لطلبات التوصيل")
 
     # 4) بناء الطلب مع حفظ لقطة الأسعار والتفصيلة الكاملة وقت الإنشاء.
@@ -313,7 +313,7 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
         discount_amount=pricing.discount_amount,
         delivery_fee=pricing.delivery_fee,
         delivery_name=(f"{delivery_option.name} - {pricing.delivery_zone.name}" if delivery_option and pricing.delivery_zone else delivery_option.name if delivery_option else None),
-        is_pickup=bool(delivery_option and delivery_option.is_pickup),
+        delivery_type=delivery_option.delivery_type if delivery_option else "fixed",
         total=pricing.total,
         notes=payload.notes,
         pickup_time=scheduled_time,

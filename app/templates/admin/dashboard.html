@@ -19,32 +19,33 @@
 
 {% if not has_data %}
   <div class="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center">
+    <div class="mb-3 text-3xl" aria-hidden="true">📊</div>
     <p class="text-base font-bold text-slate-700">لا توجد بيانات لهذه الفترة</p>
     <p class="mt-1 text-sm text-slate-500">ابدأ بإنشاء أول طلب أو جرّب فترة زمنية أخرى.</p>
   </div>
 {% else %}
 <section class="mb-6">
   <h2 class="mb-3 text-base font-bold sm:text-lg">نظرة عامة</h2>
-  <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-    <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <p class="text-xs font-medium text-slate-500 sm:text-sm">إجمالي الطلبات</p>
-      <p class="mt-1 text-2xl font-extrabold sm:text-3xl">{{ a.total_orders }}</p>
+  <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+    <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+      <p class="text-[10px] font-medium text-slate-500 sm:text-xs">إجمالي الطلبات</p>
+      <p class="mt-1 text-xl font-extrabold sm:text-2xl lg:text-3xl">{{ a.total_orders }}</p>
     </div>
-    <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <p class="text-xs font-medium text-slate-500 sm:text-sm">إجمالي الإيرادات</p>
-      <p class="mt-1 text-2xl font-extrabold text-emerald-700 sm:text-3xl">{{ a.total_revenue }} {{ settings.currency }}</p>
+    <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+      <p class="text-[10px] font-medium text-slate-500 sm:text-xs">إجمالي الإيرادات</p>
+      <p class="mt-1 text-xl font-extrabold text-emerald-700 sm:text-2xl lg:text-3xl">{{ a.total_revenue }} {{ settings.currency }}</p>
     </div>
-    <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <p class="text-xs font-medium text-slate-500 sm:text-sm">متوسط قيمة الطلب</p>
-      <p class="mt-1 text-2xl font-extrabold sm:text-3xl">{{ a.aov }} {{ settings.currency }}</p>
+    <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+      <p class="text-[10px] font-medium text-slate-500 sm:text-xs">متوسط قيمة الطلب</p>
+      <p class="mt-1 text-xl font-extrabold sm:text-2xl lg:text-3xl">{{ a.aov }} {{ settings.currency }}</p>
     </div>
-    <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <p class="text-xs font-medium text-slate-500 sm:text-sm">العملاء النشطون</p>
-      <p class="mt-1 text-2xl font-extrabold sm:text-3xl">{{ a.active_customers }}</p>
+    <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+      <p class="text-[10px] font-medium text-slate-500 sm:text-xs">العملاء النشطون</p>
+      <p class="mt-1 text-xl font-extrabold sm:text-2xl lg:text-3xl">{{ a.active_customers }}</p>
     </div>
-    <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <p class="text-xs font-medium text-slate-500 sm:text-sm">عملاء جدد</p>
-      <p class="mt-1 text-2xl font-extrabold sm:text-3xl">{{ a.new_customers }}</p>
+    <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+      <p class="text-[10px] font-medium text-slate-500 sm:text-xs">عملاء جدد</p>
+      <p class="mt-1 text-xl font-extrabold sm:text-2xl lg:text-3xl">{{ a.new_customers }}</p>
     </div>
   </div>
 </section>

@@ -43,7 +43,7 @@ product = Product(category=cat, name="منتج اختبار", slug="stage2-produ
 db.add(product)
 db.flush()
 
-delivery = DeliveryOption(name="توصيل مرحلة2", fee=Decimal("10"), is_pickup=False, is_active=True)
+delivery = DeliveryOption(name="توصيل مرحلة2", fee=Decimal("10"), delivery_type="fixed", is_active=True)
 db.add(delivery)
 db.flush()
 

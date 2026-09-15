@@ -1,14 +1,13 @@
 <div class="border-t p-4 sm:p-5">
 
-    <!-- الإجمالي من حساب الـBackend -->
-    <div class="mb-4">
-        <p class="text-base font-bold">ملخص الطلب</p>
-        <p class="mt-1 text-2xl font-extrabold text-primary sm:text-3xl">
+    <div class="mb-4 text-center">
+        <p class="text-sm text-slate-500">ملخص الطلب</p>
+        <p class="mt-0.5 text-2xl font-extrabold text-primary sm:text-3xl">
             <span x-text="formatPrice(total())"></span> {{ settings.currency }}
         </p>
     </div>
 
-    <form class="space-y-4" @submit.prevent="submitOrder()">
+    <form class="space-y-3.5" @submit.prevent="submitOrder()">
 
         <!-- طريقة الاستلام: توصيل / استلام -->
         <div x-show="deliveryOptions.length > 0">
@@ -16,7 +15,7 @@
             <div class="grid grid-cols-2 gap-2">
                 <template x-for="opt in deliveryOptions" :key="opt.id">
                     <label
-                        class="touch-target flex cursor-pointer flex-col items-center justify-center gap-0.5 rounded-xl border p-2 text-center transition"
+                        class="touch-target flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border p-2.5 text-center transition"
                         :class="selectedDeliveryId === opt.id ? 'border-primary bg-primary/5' : 'border-slate-200 hover:border-primary/40'">
                         <input type="radio" name="delivery-option" class="sr-only" :value="opt.id"
                             x-model.number="selectedDeliveryId" @change="onCheckoutChange()">
@@ -31,7 +30,7 @@
             </div>
         </div>
 
-        <div x-show="!isPickup() && deliveryZones.length > 0" class="mt-3">
+        <div x-show="isZone() && deliveryZones.length > 0" class="mt-3">
             <label class="block text-sm font-bold">منطقة التوصيل
                 <select x-model.number="selectedZoneId" @change="onCheckoutChange()" class="mt-1 w-full rounded-xl border p-3">
                     <option :value="null">اختر المنطقة</option>
@@ -46,12 +45,12 @@
         <div>
             <p class="mb-2 text-sm font-bold">وقت الطلب</p>
             <div class="grid grid-cols-2 gap-2">
-                <label class="touch-target flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border p-2 text-sm font-semibold transition"
+                <label class="touch-target flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border p-3 text-sm font-semibold transition"
                     :class="scheduling === 'asap' ? 'border-primary bg-primary/5' : 'border-slate-200'">
                     <input type="radio" name="scheduling" value="asap" x-model="scheduling" @change="onCheckoutChange()">
                     في أقرب وقت
                 </label>
-                <label class="touch-target flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border p-2 text-sm font-semibold transition"
+                <label class="touch-target flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border p-3 text-sm font-semibold transition"
                     :class="scheduling === 'scheduled' ? 'border-primary bg-primary/5' : 'border-slate-200'">
                     <input type="radio" name="scheduling" value="scheduled" x-model="scheduling" @change="onCheckoutChange()">
                     وقت محدد
@@ -59,23 +58,23 @@
             </div>
             <input type="datetime-local" x-show="scheduling === 'scheduled'" x-model="scheduledTime"
                 :min="minScheduledTime()" @change="onCheckoutChange()"
-                class="mt-2 w-full rounded-xl border p-3 text-sm">
+                class="mt-2 w-full rounded-xl border p-3.5 text-sm">
         </div>
 
         <!-- بيانات العميل -->
-        <input x-model="customer.name" required placeholder="الاسم" class="w-full rounded-xl border p-3">
-        <input x-model="customer.phone" required placeholder="رقم الهاتف" class="w-full rounded-xl border p-3">
+        <input x-model="customer.name" required placeholder="الاسم" class="w-full rounded-xl border p-3.5">
+        <input x-model="customer.phone" required placeholder="رقم الهاتف" class="w-full rounded-xl border p-3.5">
         <template x-if="!isPickup()">
-            <input x-model="customer.address" required placeholder="العنوان" class="w-full rounded-xl border p-3">
+            <input x-model="customer.address" required placeholder="العنوان" class="w-full rounded-xl border p-3.5">
         </template>
-        <textarea x-model="customer.notes" rows="2" placeholder="ملاحظات عامة (اختياري)" class="w-full rounded-xl border p-3"></textarea>
+        <textarea x-model="customer.notes" rows="2" placeholder="ملاحظات عامة (اختياري)" class="w-full rounded-xl border p-3.5"></textarea>
 
         <!-- كوبون الخصم -->
         <div>
             <p class="mb-2 text-sm font-bold">كوبون خصم (اختياري)</p>
             <div class="flex gap-2">
                 <input x-model="couponCode" @input="couponValid = null; couponMessage = ''" placeholder="كود الكوبون"
-                    class="min-w-0 flex-1 rounded-xl border p-3">
+                    class="min-w-0 flex-1 rounded-xl border p-3.5">
                 <button type="button" @click="applyCoupon()" :disabled="previewLoading"
                     class="touch-target rounded-xl bg-slate-800 px-4 font-bold text-white transition disabled:opacity-50">تطبيق</button>
             </div>
@@ -84,7 +83,7 @@
         </div>
 
         <!-- تفصيلة الحساب (محسوبة في الـBackend) -->
-        <div class="space-y-1 rounded-xl bg-slate-50 p-3 text-sm" x-show="items.length > 0">
+        <div class="space-y-1.5 rounded-xl bg-white p-4 text-sm shadow-sm" x-show="items.length > 0">
             <div class="flex justify-between"><span class="text-slate-500">الإجمالي الفرعي</span>
                 <span x-text="formatPrice(preview.subtotal)"></span></div>
             <div class="flex justify-between text-emerald-600" x-show="preview.discount_amount > 0">
@@ -100,19 +99,19 @@
             <p class="mb-2 text-sm font-bold">طريقة الدفع</p>
             <div class="grid grid-cols-3 gap-2">
                 <label
-                    class="touch-target flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border p-2 text-center transition"
+                    class="touch-target flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border p-3 text-center transition"
                     :class="selectedPaymentMethod === 'cash' ? 'border-primary bg-primary/5' : 'border-slate-200'">
                     <input type="radio" name="payment_method" value="cash" x-model="selectedPaymentMethod" class="sr-only">
                     <span class="text-sm font-bold">كاش</span>
                 </label>
                 <label
-                    class="touch-target flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border p-2 text-center transition"
+                    class="touch-target flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border p-3 text-center transition"
                     :class="selectedPaymentMethod === 'ewallet' ? 'border-primary bg-primary/5' : 'border-slate-200'">
                     <input type="radio" name="payment_method" value="ewallet" x-model="selectedPaymentMethod" class="sr-only">
                     <span class="text-sm font-bold">محفظة إلكترونية</span>
                 </label>
                 <label
-                    class="touch-target flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border p-2 text-center transition"
+                    class="touch-target flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border p-3 text-center transition"
                     :class="selectedPaymentMethod === 'card' ? 'border-primary bg-primary/5' : 'border-slate-200'">
                     <input type="radio" name="payment_method" value="card" x-model="selectedPaymentMethod" class="sr-only">
                     <span class="text-sm font-bold">فيزا</span>
@@ -122,7 +121,7 @@
 
         <button
             :disabled="items.length===0||loading"
-            class="touch-target flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 font-bold text-white transition hover:bg-secondary disabled:opacity-50 active:scale-[0.98]">
+            class="touch-target flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-4 font-bold text-white transition hover:bg-secondary disabled:opacity-50 active:scale-[0.98]">
             <span x-show="loading" class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
             <span x-text="loading ? 'جاري الإرسال...' : 'إرسال الطلب عبر واتساب'"></span>
         </button>

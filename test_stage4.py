@@ -64,8 +64,8 @@ try:
     p2 = Product(category=cat, name="Pizza B", slug="pizza-b", base_price=Decimal("200"), is_active=True, is_available=True)
     db.add_all([p1, p2])
     db.flush()
-    opt_delivery = DeliveryOption(name="توصيل", fee=Decimal("15"), is_pickup=False, is_active=True)
-    opt_pickup = DeliveryOption(name="استلام", fee=Decimal("0"), is_pickup=True, is_active=True)
+    opt_delivery = DeliveryOption(name="توصيل", fee=Decimal("15"), delivery_type="fixed", is_active=True)
+    opt_pickup = DeliveryOption(name="استلام", fee=Decimal("0"), delivery_type="pickup", is_active=True)
     db.add_all([opt_delivery, opt_pickup])
     db.flush()
     c_normal = Coupon(
@@ -159,7 +159,7 @@ try:
     empty_p = Product(category=empty_cat, name="Empty P", slug="empty-p-s4", base_price=Decimal("50"), is_active=True, is_available=True)
     db.add(empty_p)
     db.flush()
-    db.add(DeliveryOption(name="Empty Delivery S4", fee=Decimal("10"), is_pickup=False, is_active=True))
+    db.add(DeliveryOption(name="Empty Delivery S4", fee=Decimal("10"), delivery_type="fixed", is_active=True))
     db.flush()
     db.commit()
 

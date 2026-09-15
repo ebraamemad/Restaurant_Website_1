@@ -17,11 +17,11 @@
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
-tailwind.config={theme:{extend:{fontFamily:{cairo:["Cairo","sans-serif"]},colors:{primary:"{{ theme.primary }}",secondary:"{{ theme.secondary }}",accent:"{{ theme.accent }}",light:"#f8fafc"},boxShadow:{card:"0 10px 30px rgba(0,0,0,.08")}}}}
+tailwind.config={theme:{extend:{fontFamily:{cairo:["Cairo","sans-serif"]},colors:{primary:"{{ theme.primary }}",secondary:"{{ theme.secondary }}",accent:"{{ theme.accent }}",light:"#f8fafc"},boxShadow:{card:"0 10px 30px rgba(0,0,0,.08)"}}}}
 </script>
 <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <link rel="stylesheet" href="/static/css/app.css">
-<style>:root{--color-primary:{{ theme.primary }};--color-secondary:{{ theme.secondary }};--color-accent:{{ theme.accent }}</style>
+<style>:root{--color-primary:{{ theme.primary }};--color-secondary:{{ theme.secondary }};--color-accent:{{ theme.accent }}}</style>
 </head>
 <body class="min-h-screen font-cairo text-slate-800 antialiased selection:bg-primary selection:text-white" style="background: radial-gradient(circle at top, color-mix(in srgb, {{ theme.primary }} 12%, transparent), transparent 45%), linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)">
 <a href="#" id="customer-install-btn" class="fixed top-3 left-3 z-40 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-lg hover:bg-emerald-700 transition" style="display:none">📱 تثبيت</a>

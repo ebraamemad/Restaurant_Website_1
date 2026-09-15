@@ -15,8 +15,8 @@ from app.models import Coupon, DeliveryOption
 def main() -> None:
     with SessionLocal() as db:
         delivery_specs = [
-            {"name": "توصيل", "fee": Decimal("15.00"), "is_pickup": False, "estimated_time": "30-45 دقيقة", "sort_order": 1},
-            {"name": "استلام من المطعم", "fee": Decimal("0.00"), "is_pickup": True, "estimated_time": None, "sort_order": 2},
+            {"name": "توصيل", "fee": Decimal("15.00"), "delivery_type": "fixed", "estimated_time": "30-45 دقيقة", "sort_order": 1},
+            {"name": "استلام من المطعم", "fee": Decimal("0.00"), "delivery_type": "pickup", "estimated_time": None, "sort_order": 2},
         ]
         for spec in delivery_specs:
             existing = db.scalar(select(DeliveryOption).where(DeliveryOption.name == spec["name"]))

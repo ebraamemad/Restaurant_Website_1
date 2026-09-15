@@ -46,7 +46,7 @@ product2 = Product(category=cat, name="product اختبار2", slug="stage1-prod
 db.add_all([product, product2])
 db.flush()
 
-delivery = DeliveryOption(name="توصيل مرحلة1", fee=Decimal("10"), is_pickup=False, is_active=True)
+delivery = DeliveryOption(name="توصيل مرحلة1", fee=Decimal("10"), delivery_type="fixed", is_active=True)
 db.add(delivery)
 db.flush()
 

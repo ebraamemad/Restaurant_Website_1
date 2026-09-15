@@ -126,7 +126,7 @@ def build_whatsapp_message(
     discount_amount: Decimal,
     delivery_fee: Decimal,
     delivery_name: Optional[str],
-    is_pickup: bool,
+    delivery_type: str,
     total: Decimal,
     notes: Optional[str],
     pickup_time: Optional[datetime] = None,
@@ -145,7 +145,7 @@ def build_whatsapp_message(
     if delivery_name:
         lines.append(f"طريقة الاستلام: {delivery_name}")
     else:
-        lines.append("طريقة الاستلام: " + ("استلام من المطعم" if is_pickup else "توصيل"))
+        lines.append("طريقة الاستلام: " + ("استلام من المطعم" if delivery_type == "pickup" else "توصيل"))
     if pickup_time is not None:
         # العرض بالتوقيت المحلي للمطعم — نفس التوقيت اللي بيرجع من قاعدة البيانات.
         lines.append(f"موعد الطلب: {ensure_aware(pickup_time).astimezone().strftime('%Y-%m-%d %H:%M')}")

@@ -162,12 +162,12 @@ def dashboard_analytics(
     pickup_stmt = _apply_date(
         select(func.count(Order.id))
         .join(DeliveryOption, Order.delivery_option_id == DeliveryOption.id)
-        .where(valid_order, DeliveryOption.is_pickup.is_(True))
+        .where(valid_order, DeliveryOption.delivery_type == "pickup")
     )
     delivery_stmt = _apply_date(
         select(func.count(Order.id))
         .join(DeliveryOption, Order.delivery_option_id == DeliveryOption.id)
-        .where(valid_order, DeliveryOption.is_pickup.is_(False))
+        .where(valid_order, DeliveryOption.delivery_type.in_(["fixed", "zone"]))
     )
     pickup_orders = int(db.scalar(pickup_stmt) or 0)
     delivery_orders = int(db.scalar(delivery_stmt) or 0)
@@ -240,7 +240,14 @@ def parse_dashboard_range(request: Request) -> tuple[Optional[datetime], Optiona
     return start_dt, end_dt, range_value
 
 
-def customer_rows(db: Session, sort: str = "spent"):
+def customer_rows(
+    db: Session,
+    sort: str = "spent",
+    start_dt: Optional[datetime] = None,
+    end_dt: Optional[datetime] = None,
+    min_orders: Optional[int] = None,
+    q: Optional[str] = None,
+):
     valid_order = Order.status != OrderStatus.cancelled.value
     total_orders = func.count(Order.id).filter(valid_order)
     total_spent = func.coalesce(func.sum(Order.total).filter(valid_order), 0)
@@ -249,6 +256,23 @@ def customer_rows(db: Session, sort: str = "spent"):
         .outerjoin(Order, Order.customer_id == Customer.id)
         .group_by(Customer.id)
     )
+    if start_dt is not None:
+        statement = statement.where(Order.created_at >= start_dt)
+    if end_dt is not None:
+        statement = statement.where(Order.created_at < end_dt)
+    if min_orders is not None:
+        statement = statement.having(total_orders >= min_orders)
+    if q:
+        normalized = normalize_phone(q)
+        conditions = [Customer.name.ilike(f"%{q.lower()}%")]
+        if normalized:
+            phone_patterns = [f"%{normalized}%"]
+            if normalized.startswith("0") and len(normalized) > 1:
+                phone_patterns.append(f"%{normalized[1:]}%")
+            elif normalized.startswith("20") and len(normalized) > 2:
+                phone_patterns.append(f"%0{normalized[2:]}%")
+            conditions.append(or_(*[Customer.phone.like(p) for p in phone_patterns]))
+        statement = statement.where(or_(*conditions))
     if sort == "orders":
         statement = statement.order_by(total_orders.desc(), total_spent.desc())
     elif sort == "last":
@@ -347,7 +371,7 @@ def delete_category(category_id: int, request: Request, db: Session = Depends(ge
 
 
 @router.get("/products", response_class=HTMLResponse)
-def products_page(request: Request, q: Optional[str] = None, db: Session = Depends(get_db)) -> HTMLResponse:
+def products_page(request: Request, q: Optional[str] = None, category_id: Optional[int] = None, db: Session = Depends(get_db)) -> HTMLResponse:
     categories = db.scalars(select(Category).order_by(Category.sort_order, Category.name)).all()
     statement = select(Product).options(selectinload(Product.category))
     query = (q or "").strip()
@@ -357,10 +381,12 @@ def products_page(request: Request, q: Optional[str] = None, db: Session = Depen
             statement = statement.where(or_(*[Product.name.ilike(f"%{term}%") for term in terms]))
         else:
             statement = statement.where(Product.name.ilike(f"%{query}%"))
+    if category_id:
+        statement = statement.where(Product.category_id == category_id)
     products = db.scalars(statement.order_by(Product.sort_order, Product.name)).all()
     return templates.TemplateResponse(
         "admin/products.html",
-        {"request": request, "categories": categories, "products": products, "q": query},
+        {"request": request, "categories": categories, "products": products, "q": query, "category_id": category_id},
     )
 
 
@@ -829,21 +855,78 @@ def delete_delivery_zone(zone_id: int, db: Session = Depends(get_db)) -> Redirec
 
 
 @router.get("/customers", response_class=HTMLResponse)
-def customers_page(request: Request, sort: str = "spent", db: Session = Depends(get_db)) -> HTMLResponse:
+def customers_page(
+    request: Request,
+    sort: str = "spent",
+    q: Optional[str] = None,
+    range: str = "all",
+    min_orders: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
     if sort not in {"spent", "orders", "last"}:
         sort = "spent"
+
+    start_dt, end_dt, _ = parse_dashboard_range(request)
+    if date_from:
+        try:
+            start_dt = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            start_dt = None
+    if date_to:
+        try:
+            end_dt = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+        except ValueError:
+            end_dt = None
+
+    if min_orders is not None and min_orders < 1:
+        min_orders = None
+
     return templates.TemplateResponse(
-        "admin/customers.html", {"request": request, "customers": customer_rows(db, sort), "sort": sort,
-                                  "settings": get_or_create_settings(db)}
+        "admin/customers.html",
+        {
+            "request": request,
+            "customers": customer_rows(db, sort, start_dt, end_dt, min_orders, q),
+            "sort": sort,
+            "q": q or "",
+            "range": range,
+            "min_orders": min_orders,
+            "date_from": date_from or "",
+            "date_to": date_to or "",
+            "settings": get_or_create_settings(db),
+        },
     )
 
 
 @router.get("/customers/export")
-def export_customers(sort: str = "spent", db: Session = Depends(get_db)) -> Response:
+def export_customers(
+    sort: str = "spent",
+    q: Optional[str] = None,
+    range: str = "all",
+    min_orders: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> Response:
+    start_dt, end_dt = None, None
+    if date_from:
+        try:
+            start_dt = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            end_dt = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+        except ValueError:
+            pass
+    if min_orders is not None and min_orders < 1:
+        min_orders = None
+    customers = customer_rows(db, sort, start_dt, end_dt, min_orders, q)
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["الاسم", "رقم الهاتف", "عدد الطلبات", "إجمالي المشتريات", "أول طلب", "آخر طلب"])
-    for customer, total_orders, total_spent in customer_rows(db, sort):
+    for customer, total_orders, total_spent in customers:
         writer.writerow([customer.name or "", customer.phone, total_orders, total_spent, customer.first_order_at, customer.last_order_at])
     return Response(
         content="\ufeff" + output.getvalue(), media_type="text/csv; charset=utf-8",
@@ -896,21 +979,23 @@ def save_delivery_option(
     fee: Decimal = Form(default=Decimal("0.00")),
     estimated_time: Optional[str] = Form(default=None),
     sort_order: int = Form(default=0),
-    is_pickup: bool = Form(default=False),
+    delivery_type: str = Form(default="fixed"),
     is_active: bool = Form(default=False),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
+    if delivery_type not in {"pickup", "fixed", "zone"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "نوع التوصيل غير صالح")
+    if fee < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "الرسوم لا يمكن أن تكون سالبة")
     option = db.get(DeliveryOption, id) if id else DeliveryOption()
     if id and option is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Delivery option not found")
-    if fee < 0:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Fee cannot be negative")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "طريقة التوصيل غير موجودة")
     option.name = name.strip()
     option.description = description or None
     option.fee = fee
     option.estimated_time = estimated_time or None
     option.sort_order = sort_order
-    option.is_pickup = is_pickup
+    option.delivery_type = delivery_type
     option.is_active = is_active
     db.add(option)
     db.commit()

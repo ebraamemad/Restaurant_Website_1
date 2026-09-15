@@ -4,12 +4,15 @@
 <form method="post" class="mb-6 grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-2">
   {{ csrf_field(request) }}
   <input name="name" required class="rounded border px-3 py-2" placeholder="الاسم (مثال: توصيل / استلام من المطعم)">
+  <select name="delivery_type" class="rounded border px-3 py-2">
+    <option value="fixed">توصيل ثابت</option>
+    <option value="pickup">استلام من المطعم</option>
+    <option value="zone">توصيل حسب المنطقة</option>
+  </select>
   <input name="fee" type="number" step="0.01" min="0" value="0" class="rounded border px-3 py-2" placeholder="رسوم التوصيل">
   <input name="estimated_time" class="rounded border px-3 py-2" placeholder="الوقت المتوقع (مثال: 30-45 دقيقة)">
   <input name="sort_order" type="number" value="0" class="rounded border px-3 py-2" placeholder="الترتيب">
-  <textarea name="description" class="rounded border px-3 py-2 md:col-span-2" placeholder="وصف مختصر (اختياري)"></textarea>
-  <label><input name="is_pickup" type="checkbox" value="true"> استلام من المطعم (بدون عنوان أو رسوم)</label>
-  <label><input name="is_active" type="checkbox" value="true" checked> نشط</label>
+  <label class="flex items-center gap-2 md:col-span-2"><input name="is_active" type="checkbox" value="true" checked> نشط</label>
   <button class="rounded bg-slate-900 px-4 py-2 font-bold text-white md:col-span-2">إضافة طريقة</button>
 </form>
 <div class="grid gap-4 md:grid-cols-2">
@@ -19,17 +22,19 @@
       <input type="hidden" name="id" value="{{ option.id }}">
       <input name="name" value="{{ option.name }}" required class="mb-2 w-full rounded border px-3 py-2">
       <div class="mb-2 grid grid-cols-2 gap-2">
-        <label class="text-sm text-slate-600">الرسوم
-          <input name="fee" type="number" step="0.01" min="0" value="{{ option.fee }}" class="mt-1 w-full rounded border px-3 py-2">
+        <label class="text-sm text-slate-600">النوع
+          <select name="delivery_type" class="mt-1 w-full rounded border px-3 py-2">
+            <option value="fixed" {% if option.delivery_type == "fixed" %}selected{% endif %}>توصيل ثابت</option>
+            <option value="pickup" {% if option.delivery_type == "pickup" %}selected{% endif %}>استلام من المطعم</option>
+            <option value="zone" {% if option.delivery_type == "zone" %}selected{% endif %}>توصيل حسب المنطقة</option>
+          </select>
         </label>
         <label class="text-sm text-slate-600">الترتيب
           <input name="sort_order" type="number" value="{{ option.sort_order }}" class="mt-1 w-full rounded border px-3 py-2">
         </label>
       </div>
       <input name="estimated_time" value="{{ option.estimated_time or '' }}" class="mb-2 w-full rounded border px-3 py-2" placeholder="الوقت المتوقع">
-      <textarea name="description" class="mb-2 w-full rounded border px-3 py-2" placeholder="وصف مختصر (اختياري)">{{ option.description or "" }}</textarea>
       <div class="mb-3 flex gap-4">
-        <label><input name="is_pickup" type="checkbox" value="true" {% if option.is_pickup %}checked{% endif %}> استلام من المطعم</label>
         <label><input name="is_active" type="checkbox" value="true" {% if option.is_active %}checked{% endif %}> نشط</label>
       </div>
       <button class="rounded bg-emerald-700 px-4 py-2 text-white">حفظ</button>

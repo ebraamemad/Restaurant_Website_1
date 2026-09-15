@@ -169,8 +169,8 @@ def seed() -> dict:
     e_ketch = ProductOption(product_id=p4.id, group_id=g_crepe_extra.id, name="كاتشب", price_adjustment=Decimal("5.00"), is_available=True, sort_order=3)
     db.add_all([e_moz, e_pane, e_ketch])
 
-    d_delivery = DeliveryOption(name="توصيل", fee=Decimal("15.00"), is_pickup=False, is_active=True, sort_order=1)
-    d_pickup = DeliveryOption(name="استلام من المطعم", fee=Decimal("0.00"), is_pickup=True, is_active=True, sort_order=2)
+    d_delivery = DeliveryOption(name="توصيل", fee=Decimal("15.00"), delivery_type="fixed", is_active=True, sort_order=1)
+    d_pickup = DeliveryOption(name="استلام من المطعم", fee=Decimal("0.00"), delivery_type="pickup", is_active=True, sort_order=2)
     db.add_all([d_delivery, d_pickup])
 
     # Delivery zone so preview with delivery option doesn't fail
@@ -272,7 +272,7 @@ r = client.get("/api/delivery-options")
 check("GET خيارات التوصيل -> 200", r.status_code == 200)
 check("على الأقل خيارين نشطين", len(r.json()) >= 2, str(len(r.json())))
 check("رسوم التوصيل من الـDB = 15", any(d["name"] == "توصيل" and d["fee"] == "15.00" for d in r.json()))
-check("علامة is_pickup موجودة في خيار الاستلام", any(d["name"] == "استلام من المطعم" and d["is_pickup"] and d["fee"] == "0.00" for d in r.json()))
+check("علامة is_pickup موجودة في خيار الاستلام", any(d["name"] == "استلام من المطعم" and d.get("delivery_type") == "pickup" and d["fee"] == "0.00" for d in r.json()))
 
 # ====== 6) Coupon validation ======
 print("== Coupon validation ==")
@@ -696,17 +696,17 @@ r = client.get("/admin/delivery-options")
 check("صفحة طرق الاستلام بعد الدخول -> 200", r.status_code == 200, str(r.status_code))
 r = admin_post(
     "/admin/delivery-options",
-    {"name": "استلام تجريبي", "fee": "0", "sort_order": 9, "is_pickup": "true", "is_active": "true"},
+    {"name": "استلام تجريبي", "fee": "0", "sort_order": 9, "delivery_type": "pickup", "is_active": "true"},
 )
 check("إضافة طريقة استلام -> 303", r.status_code == 303, str(r.status_code))
 db = TestingSessionLocal()
 new_option = db.scalar(select(DeliveryOption).where(DeliveryOption.name == "استلام تجريبي"))
 check("طريقة الاستلام اتحفطت", new_option is not None)
 if new_option is not None:
-    check("علامة is_pickup اتحفطت", new_option.is_pickup is True)
+    check("علامة is_pickup اتحفطت", new_option.delivery_type == "pickup")
     option_id = new_option.id
 
-    r = admin_post("/admin/delivery-options", {"id": option_id, "name": "استلام تجريبي", "fee": "0", "sort_order": 9, "is_pickup": "true"})
+    r = admin_post("/admin/delivery-options", {"id": option_id, "name": "استلام تجريبي", "fee": "0", "sort_order": 9, "delivery_type": "pickup"})
     check("تعديل طريقة بدون نشط -> 303", r.status_code == 303, str(r.status_code))
     edited_opt = TestingSessionLocal().get(DeliveryOption, option_id)
     check("الطريقة اتعطت (checkbox فاضي = غير نشط)", edited_opt.is_active is False)

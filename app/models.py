@@ -267,11 +267,11 @@ class DeliveryOption(Base):
     __tablename__ = "delivery_options"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), nullable=False)  # مثال: "التوصيل", "الاستلام"
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
     fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
-    estimated_time: Mapped[Optional[str]] = mapped_column(String(50))  # مثال: "30-45 دقيقة"
-    is_pickup: Mapped[bool] = mapped_column(Boolean, default=False)  # True = استلام من المطعم (بدون عنوان/رسوم)
+    estimated_time: Mapped[Optional[str]] = mapped_column(String(50))
+    delivery_type: Mapped[str] = mapped_column(String(20), default="fixed")  # pickup | fixed | zone
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

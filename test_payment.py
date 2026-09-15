@@ -87,7 +87,7 @@ try:
     db.flush()
     p1 = Product(category=cat, name="بيتزا دفع", slug="pay-pizza", base_price=Decimal("100"), is_active=True, is_available=True)
     db.add(p1)
-    opt_pickup = DeliveryOption(name="استلام", fee=Decimal("0"), is_pickup=True, is_active=True, sort_order=1)
+    opt_pickup = DeliveryOption(name="استلام", fee=Decimal("0"), delivery_type="pickup", is_active=True, sort_order=1)
     db.add(opt_pickup)
     db.flush()
     db.commit()

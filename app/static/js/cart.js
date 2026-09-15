@@ -105,7 +105,11 @@ function storeCart() {
     },
     isPickup() {
       const opt = this.selectedDeliveryOption();
-      return !!opt && !!opt.is_pickup;
+      return !!opt && opt.delivery_type === "pickup";
+    },
+    isZone() {
+      const opt = this.selectedDeliveryOption();
+      return !!opt && opt.delivery_type === "zone";
     },
     minScheduledTime() {
       const d = new Date(Date.now() + 15 * 60000);
@@ -141,7 +145,7 @@ function storeCart() {
           body: JSON.stringify({
             items: this.mappedItems(),
             delivery_option_id: this.selectedDeliveryId,
-            delivery_zone_id: this.isPickup() ? null : this.selectedZoneId,
+            delivery_zone_id: this.isZone() ? this.selectedZoneId : null,
             coupon_code: this.couponCode.trim() || null,
           }),
         });
@@ -308,7 +312,7 @@ function storeCart() {
             customer_address: this.isPickup() ? null : this.customer.address.trim(),
             notes: this.customer.notes || null,
             delivery_option_id: this.selectedDeliveryId,
-            delivery_zone_id: this.isPickup() ? null : this.selectedZoneId,
+            delivery_zone_id: this.isZone() ? this.selectedZoneId : null,
             coupon_code: this.couponCode.trim() || null,
             pickup_time: pickupTime,
             payment_method: this.selectedPaymentMethod,
