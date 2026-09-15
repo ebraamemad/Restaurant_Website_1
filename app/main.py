@@ -1,14 +1,9 @@
 '''
-هي بوابة البرنامج الرئيسي للتطبيق، وبتحتوي على كل الروابط الخاصة بالعميل، وروابط تسجيل الدخول، وروابط الأدمن.
-
-
-التشغيل
-
-هو بدياة التطبيق، وبيتم استدعاءه من ملف
-
+Application entry point with security middleware.
 '''
-
-
+import os
+import time
+from collections import defaultdict
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -21,11 +16,9 @@ from app.security import CSRF_COOKIE_NAME, create_csrf_token, verify_csrf_token
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOADS_DIR = BASE_DIR / "uploads"
-# لازم مجلد uploads يكون موجود قبل الـ mount، وإلا التطبيق يكسر عند التشغيل على clone جديد أو deploy.
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-#يعني ينشئ تطبيق FastAPI.
+
 app = FastAPI(title=settings.app_name)
-#دي عشان يخلي الملفات الثابتة والصور المرفوعة تتفتح من المتصفح.
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
@@ -39,11 +32,71 @@ def _is_admin_path(path: str) -> bool:
     return path == "/admin" or path.startswith("/admin/")
 
 
+# ---------------------------------------------------------------------------
+# Rate limiting (in-memory, fixed-window)
+# ---------------------------------------------------------------------------
+# Simple in-memory rate limiter suitable for single-instance deployments.
+# For multi-instance / distributed setups, replace with Redis-backed limiter.
+
+_RATE_LIMIT_WINDOW_SECONDS = 60
+_RATE_LIMIT_MAX_REQUESTS = int(os.environ.get("RATE_LIMIT_MAX_REQUESTS", "200"))
+_rate_limit_store: dict[str, list[float]] = defaultdict(list)
+
+
+def reset_rate_limits() -> None:
+    """Clear all rate limit counters. Useful for testing."""
+    _rate_limit_store.clear()
+
+
+def _rate_limit_key(request: Request) -> str:
+    """Build a rate-limit key from client IP + method + path."""
+    client_ip = request.client.host if request.client else "unknown"
+    return f"{client_ip}:{request.method}:{request.url.path}"
+
+
+def _check_rate_limit(key: str) -> bool:
+    """Return True if the request is allowed, False if rate-limited."""
+    now = time.monotonic()
+    window_start = now - _RATE_LIMIT_WINDOW_SECONDS
+    timestamps = _rate_limit_store[key]
+    # Prune old entries
+    timestamps[:] = [t for t in timestamps if t > window_start]
+    if len(timestamps) >= _RATE_LIMIT_MAX_REQUESTS:
+        return False
+    timestamps.append(now)
+    return True
+
+
+# Paths that should be rate-limited (public order submission + coupon validation)
+_RATE_LIMITED_PATHS = frozenset({
+    "/orders",
+    "/api/orders/preview",
+    "/api/coupons/validate",
+})
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    # Skip rate limiting in non-production environments to allow testing
+    if settings.app_env != "production":
+        return await call_next(request)
+    path = request.url.path
+    if request.method in ("POST", "PUT", "PATCH") and path in _RATE_LIMITED_PATHS:
+        key = _rate_limit_key(request)
+        if not _check_rate_limit(key):
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "detail": "Rate limit exceeded. Please try again later.",
+                    "retry_after": _RATE_LIMIT_WINDOW_SECONDS,
+                },
+                headers={"Retry-After": str(_RATE_LIMIT_WINDOW_SECONDS)},
+            )
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def admin_csrf_cookie(request: Request, call_next):
-    # Middleware لا يقرأ body إطلاقًا — فقط يصدر كوكي CSRF ويجعل التوكن
-    # متاحًا للقوالب عبر request.state. التحقق نفسه يتم في deps.verify_admin_csrf
-    # لأن قراءة الـform داخل middleware تستهلك body وتكسر باقى التطبيق.
     path = request.url.path
     state_token = None
     need_cookie = False
@@ -69,7 +122,6 @@ async def admin_csrf_cookie(request: Request, call_next):
     return response
 
 
-#دي معناها: ضيف روابط العميل، وروابط تسجيل الدخول، وروابط الأدمن للتطبيق.
 app.include_router(public.router)
 app.include_router(api.router)
 app.include_router(admin_auth.router)

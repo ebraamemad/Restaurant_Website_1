@@ -27,6 +27,7 @@ from app.models import (
     Category,
     Coupon,
     DeliveryOption,
+    DeliveryZone,
     Order,
     Product,
     ProductOption,
@@ -172,6 +173,10 @@ def seed() -> dict:
     d_pickup = DeliveryOption(name="استلام من المطعم", fee=Decimal("0.00"), is_pickup=True, is_active=True, sort_order=2)
     db.add_all([d_delivery, d_pickup])
 
+    # Delivery zone so preview with delivery option doesn't fail
+    dz_test = DeliveryZone(name="منطقة اختبار", fee=Decimal("15.00"), is_active=True, sort_order=1)
+    db.add(dz_test)
+
     c_save10 = Coupon(
         code="SAVE10", discount_type="percentage", discount_value=Decimal("10.00"),
         minimum_order=Decimal("0.00"), start_date=now - timedelta(days=1),
@@ -210,6 +215,7 @@ def seed() -> dict:
         "o_small": o_small.id, "o_med": o_med.id, "o_large": o_large.id,
         "a_cheese": a_cheese.id, "a_olives": a_olives.id, "a_mush": a_mush.id,
         "d_delivery": d_delivery.id, "d_pickup": d_pickup.id,
+        "dz_test": dz_test.id,
         "g_crepe_size": g_crepe_size.id, "g_crepe_extra": g_crepe_extra.id,
         "c_small": c_small.id, "c_med": c_med.id, "c_large": c_large.id,
         "e_moz": e_moz.id, "e_pane": e_pane.id, "e_ketch": e_ketch.id,
@@ -293,6 +299,7 @@ preview_payload = {
         {"product_id": ids["p1"], "quantity": 2, "option_id": ids["o_large"], "addon_ids": [ids["a_cheese"], ids["a_olives"]]},
     ],
     "delivery_option_id": ids["d_delivery"],
+    "delivery_zone_id": ids["dz_test"],
     "coupon_code": "SAVE10",
 }
 r = client.post("/api/orders/preview", json=preview_payload)
@@ -319,6 +326,7 @@ order_payload = {
         {"product_id": ids["p2"], "quantity": 1},
     ],
     "delivery_option_id": ids["d_delivery"],
+    "delivery_zone_id": ids["dz_test"],
     "coupon_code": "SAVE10",
     "pickup_time": (now + timedelta(days=1)).isoformat(),
 }
@@ -493,6 +501,7 @@ r = client.post("/orders", json={
     "customer_name": "عميل كامل", "customer_phone": "01000000003",
     "customer_address": "شارع كامل، الجيزة",
     "delivery_option_id": ids["d_delivery"],
+    "delivery_zone_id": ids["dz_test"],
     "coupon_code": "SAVE10",
     "items": [
         {"product_id": ids["p4"], "quantity": 2, "option_ids": [ids["c_large"], ids["e_moz"]], "item_note": "من غير مخلل"},
@@ -545,6 +554,7 @@ check("واتساب المجدول: طريقة الاستلام من المطع�
 r = client.post("/api/orders/preview", json={
     "items": [{"product_id": ids["p4"], "quantity": 2, "option_ids": [ids["c_large"], ids["e_moz"]]}],
     "delivery_option_id": ids["d_delivery"],
+    "delivery_zone_id": ids["dz_test"],
     "coupon_code": "SAVE10",
 })
 pv = r.json()

@@ -1,4 +1,4 @@
-"""اختبارات المرحلة الأولى: صفحة تفاصيل العميل."""
+"""Stage 1: Customer detail page tests."""
 from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 
@@ -8,12 +8,13 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import engine, get_db
 from app.main import app
-from app.models import Admin, Category, Customer, DeliveryOption, Order, Product, RestaurantSettings
+from app.models import Admin, Category, Customer, DeliveryOption, DeliveryZone, Order, Product, RestaurantSettings
 from app.security import hash_password
 
 connection = engine.connect()
 transaction = connection.begin()
 TestingSessionLocal = sessionmaker(bind=connection, join_transaction_mode="create_savepoint", expire_on_commit=False)
+
 
 def override_get_db():
     db = TestingSessionLocal()
@@ -21,6 +22,7 @@ def override_get_db():
         yield db
     finally:
         db.close()
+
 
 app.dependency_overrides[get_db] = override_get_db
 client = TestClient(app)
@@ -39,13 +41,17 @@ cat = Category(name="مرحلة1", slug="stage1-category", is_active=True)
 db.add(cat)
 db.flush()
 
-product = Product(category=cat, name="منتج اختبار1", slug="stage1-product1", base_price=Decimal("100"), is_active=True, is_available=True)
-product2 = Product(category=cat, name="منتج اختبار2", slug="stage1-product2", base_price=Decimal("50"), is_active=True, is_available=True)
+product = Product(category=cat, name="product اختبار1", slug="stage1-product1", base_price=Decimal("100"), is_active=True, is_available=True)
+product2 = Product(category=cat, name="product اختبار2", slug="stage1-product2", base_price=Decimal("50"), is_active=True, is_available=True)
 db.add_all([product, product2])
 db.flush()
 
 delivery = DeliveryOption(name="توصيل مرحلة1", fee=Decimal("10"), is_pickup=False, is_active=True)
 db.add(delivery)
+db.flush()
+
+zone = DeliveryZone(name="منطقة مرحلة1", fee=Decimal("10"), is_active=True)
+db.add(zone)
 db.flush()
 
 db.commit()
@@ -55,18 +61,20 @@ try:
     now = datetime.now(timezone.utc)
 
     payload1 = {
-        "customer_name": "عميل المرحلة1",
+        "customer_name": "عميل8",
         "customer_phone": phone,
         "customer_address": "عنوان الاختبار1",
         "items": [{"product_id": product.id, "quantity": 2}],
         "delivery_option_id": delivery.id,
+        "delivery_zone_id": zone.id,
     }
     payload2 = {
-        "customer_name": "عميل المرحلة1",
+        "customer_name": "عميل8",
         "customer_phone": phone,
         "customer_address": "عنوان الاختبار2",
         "items": [{"product_id": product2.id, "quantity": 3}],
         "delivery_option_id": delivery.id,
+        "delivery_zone_id": zone.id,
     }
 
     r1 = client.post("/orders", json=payload1)
@@ -88,7 +96,7 @@ try:
     detail_page = client.get(f"/admin/customers/{customer.id}")
     assert detail_page.status_code == 200, f"Customer detail page failed: {detail_page.status_code}"
     assert "1012345678" in detail_page.text, "Phone number should be in detail page"
-    assert "عميل المرحلة1" in detail_page.text, "Customer name should be in detail page"
+    assert "عميل8" in detail_page.text, "Customer name should be in detail page"
     assert "إجمالي الطلبات" in detail_page.text, "Should show total orders label"
     assert "إجمالي المشتريات" in detail_page.text, "Should show total spent label"
     assert "أول طلب" in detail_page.text, "Should show first order label"

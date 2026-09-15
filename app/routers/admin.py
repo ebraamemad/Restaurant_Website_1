@@ -224,7 +224,7 @@ def parse_dashboard_range(request: Request) -> tuple[Optional[datetime], Optiona
     range_value = (request.query_params.get("range") or "all").lower().strip()
     if range_value not in {"today", "7d", "30d", "all"}:
         range_value = "all"
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     if range_value == "today":
         start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end_dt = start_dt + timedelta(days=1)
@@ -262,7 +262,7 @@ def customer_rows(db: Session, sort: str = "spent"):
 def dashboard(request: Request, db: Session = Depends(get_db), admin: Admin = Depends(get_current_admin)) -> HTMLResponse:
     start_dt, end_dt, range_value = parse_dashboard_range(request)
     analytics = dashboard_analytics(db, start_dt, end_dt)
-    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today_start - timedelta(days=today_start.weekday())
     month_start = today_start.replace(day=1)
     latest_orders_query = (
@@ -298,7 +298,14 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin: Admin = De
 @router.get("/categories", response_class=HTMLResponse)
 def categories_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     categories = db.scalars(select(Category).order_by(Category.sort_order, Category.name)).all()
-    return templates.TemplateResponse("admin/categories.html", {"request": request, "categories": categories})
+    error = request.query_params.get("error")
+    error_message = None
+    if error == "has_products":
+        error_message = "لا يمكن حذف هذا القسم لأنه يحتوي على منتجات. يرجى نقل المنتجات أو حذفها أولًا ثم إعادة المحاولة."
+    return templates.TemplateResponse(
+        "admin/categories.html",
+        {"request": request, "categories": categories, "error_message": error_message},
+    )
 
 
 @router.post("/categories")
@@ -327,13 +334,13 @@ async def save_category(
 
 
 @router.post("/categories/{category_id}/delete")
-def delete_category(category_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+def delete_category(category_id: int, request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
     category = db.get(Category, category_id)
     if category is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Category not found")
     has_products = db.scalar(select(func.count(Product.id)).where(Product.category_id == category_id))
     if has_products:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Move or delete products before deleting this category")
+        return redirect("/admin/categories?error=has_products")
     db.delete(category)
     db.commit()
     return redirect("/admin/categories")

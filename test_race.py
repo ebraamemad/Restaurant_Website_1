@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from app.database import engine, get_db
 from app.main import app
 from app.models import (
-    Admin, Category, Coupon, DeliveryOption, Product, RestaurantSettings,
+    Admin, Category, Coupon, DeliveryOption, DeliveryZone, Product, RestaurantSettings,
 )
 from app.security import hash_password
 
@@ -47,6 +47,10 @@ sess.add(prod)
 sess.flush()
 opt = DeliveryOption(name="D", fee=Decimal("10"), is_pickup=False, is_active=True)
 sess.add(opt)
+sess.flush()
+zone = DeliveryZone(name="RZ", fee=Decimal("10"), is_active=True)
+sess.add(zone)
+sess.flush()
 coupon = Coupon(
     code="RACE10", discount_type="percentage", discount_value=Decimal("10"),
     minimum_order=Decimal("0"),
@@ -66,7 +70,7 @@ def fire_request(name):
     r = c.post("/orders", json={
         "customer_name": f"Customer {name}", "customer_phone": PHONE,
         "customer_address": "Address Test 123 Street", "items": [{"product_id": prod.id, "quantity": 1}],
-        "delivery_option_id": opt.id, "coupon_code": "RACE10",
+        "delivery_option_id": opt.id, "delivery_zone_id": zone.id, "coupon_code": "RACE10",
     })
     results.append((name, r.status_code, r.text[:120]))
 

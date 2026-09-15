@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.database import engine, get_db
 from app.main import app
 from app.models import (
-    Admin, Category, Coupon, Customer, DeliveryOption, Order, Product, RestaurantSettings,
+    Admin, Category, Coupon, Customer, DeliveryOption, DeliveryZone, Order, Product, RestaurantSettings,
 )
 from app.security import hash_password
 
@@ -91,6 +91,10 @@ try:
     db.add(delivery)
     db.flush()
 
+    zone = DeliveryZone(name="منطقة3", fee=Decimal("10"), is_active=True)
+    db.add(zone)
+    db.flush()
+
     normal_coupon = Coupon(
         code="NORMAL10", discount_type="percentage", discount_value=Decimal("10"),
         minimum_order=Decimal("0"), start_date=now - timedelta(days=1), end_date=now + timedelta(days=30),
@@ -117,11 +121,13 @@ try:
     db = TestingSessionLocal()
     product = db.scalars(select(Product).where(Product.slug == "stage3-product")).first()
     delivery = db.scalars(select(DeliveryOption).where(DeliveryOption.name == "توصيل3")).first()
+    zone = db.scalars(select(DeliveryZone).where(DeliveryZone.name == "منطقة3")).first()
 
     def make(phone, coupon=None):
         p = make_payload(phone, coupon)
         p["items"][0]["product_id"] = product.id
         p["delivery_option_id"] = delivery.id
+        p["delivery_zone_id"] = zone.id
         return p
 
     print("== 1. Normal coupon works as before (first_order_only=false) ==")
@@ -182,7 +188,7 @@ try:
     r_low = client.post("/orders", json={
         "customer_name": "عميل جديد", "customer_phone": "01030000017",
         "customer_address": "عنوان", "items": [{"product_id": product.id, "quantity": 1}],
-        "delivery_option_id": delivery.id, "coupon_code": "FIRSTMIN",
+        "delivery_option_id": delivery.id, "delivery_zone_id": zone.id, "coupon_code": "FIRSTMIN",
     })
     check("FIRSTMIN مع حد أدنى 50 لكن الطلب 100 -> 200 (يكفي)", r_low.status_code == 200, f"got {r_low.status_code}")
 

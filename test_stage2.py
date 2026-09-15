@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import engine, get_db
 from app.main import app
-from app.models import Admin, Category, Customer, DeliveryOption, Order, Product, RestaurantSettings
+from app.models import Admin, Category, Customer, DeliveryOption, DeliveryZone, Order, Product, RestaurantSettings
 from app.security import hash_password
 
 connection = engine.connect()
@@ -47,12 +47,17 @@ delivery = DeliveryOption(name="توصيل مرحلة2", fee=Decimal("10"), is_p
 db.add(delivery)
 db.flush()
 
+zone = DeliveryZone(name="منطقة مرحلة2", fee=Decimal("10"), is_active=True)
+db.add(zone)
+db.flush()
+
 db.commit()
 
 try:
     db = TestingSessionLocal()
     product = db.scalars(select(Product).where(Product.slug == "stage2-product")).first()
     delivery = db.scalars(select(DeliveryOption).where(DeliveryOption.name == "توصيل مرحلة2")).first()
+    zone = db.scalars(select(DeliveryZone).where(DeliveryZone.name == "منطقة مرحلة2")).first()
 
     now = datetime.now(timezone.utc)
 
@@ -62,6 +67,7 @@ try:
         "customer_address": "عنوان الاختبار",
         "items": [{"product_id": product.id, "quantity": 2}],
         "delivery_option_id": delivery.id,
+        "delivery_zone_id": zone.id,
     }
     payload2 = {
         "customer_name": "محمد علي",
@@ -69,6 +75,7 @@ try:
         "customer_address": "عنوان آخر",
         "items": [{"product_id": product.id, "quantity": 1}],
         "delivery_option_id": delivery.id,
+        "delivery_zone_id": zone.id,
     }
 
     r1 = client.post("/orders", json=payload1)

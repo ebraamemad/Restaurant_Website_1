@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>لوحة التحكم</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/static/favicon.png" type="image/png">
+  <meta name="theme-color" content="#10b981">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
 </head>
 <body dir="rtl" class="bg-[#f6f5f1] text-slate-950">
   <nav class="border-b border-slate-200 bg-white/95 backdrop-blur">
@@ -18,6 +23,7 @@
         <a href="/admin/delivery-options" class="rounded-full px-2.5 py-2 transition hover:bg-slate-100 sm:px-3">التوصيل والاستلام</a>
         <a href="/admin/coupons" class="rounded-full px-2.5 py-2 transition hover:bg-slate-100 sm:px-3">الكوبونات</a>
         <a href="/admin/settings" class="rounded-full px-2.5 py-2 transition hover:bg-slate-100 sm:px-3">الإعدادات</a>
+        <a href="#" id="admin-install-btn" class="rounded-full px-2.5 py-2 transition bg-emerald-100 text-emerald-700 hover:bg-emerald-200 sm:px-3" style="display:none">📱 تثبيت</a>
         <form method="post" action="/admin/logout">{{ csrf_field(request) }}<button class="rounded-full px-2.5 py-2 text-red-600 transition hover:bg-red-50 sm:px-3">خروج</button></form>
       </div>
     </div>
@@ -25,5 +31,105 @@
   <main class="mx-auto max-w-6xl px-3 py-4 sm:px-4 sm:py-6">
     {% block content %}{% endblock %}
   </main>
+
+  <script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/static/js/sw.js').catch(() => {});
+    });
+  }
+
+  const isPWAInstalled = () =>
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.navigator.standalone === true;
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    if (isPWAInstalled()) return;
+    e.preventDefault();
+    window.deferredPrompt = e;
+    const banner = document.getElementById('pwa-install-banner');
+    if (banner) {
+      banner.classList.remove('hidden');
+      banner.classList.add('flex');
+    }
+  });
+
+  window.addEventListener('appinstalled', () => {
+    window.deferredPrompt = null;
+    const banner = document.getElementById('pwa-install-banner');
+    if (banner) {
+      banner.classList.add('hidden');
+      banner.classList.remove('flex');
+    }
+  });
+
+  function dismissPWAInstall() {
+    const banner = document.getElementById('pwa-install-banner');
+    if (banner) {
+      banner.classList.add('hidden');
+      banner.classList.remove('flex');
+    }
+  }
+
+  async function installPWA() {
+    if (isIOS()) {
+      var iosDiv = document.getElementById('pwa-install-ios');
+      if (iosDiv) { iosDiv.classList.remove('hidden'); iosDiv.classList.add('flex'); }
+      return;
+    }
+    if (!window.deferredPrompt) return;
+    window.deferredPrompt.prompt();
+    const { outcome } = await window.deferredPrompt.userChoice;
+    window.deferredPrompt = null;
+    dismissPWAInstall();
+  }
+  document.addEventListener('DOMContentLoaded', function() {
+    var installBtn = document.getElementById('admin-install-btn');
+    if (installBtn) {
+      installBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        installPWA();
+      });
+    }
+  });
+</script>
+
+<div id="pwa-install-banner" class="fixed bottom-0 left-0 right-0 z-50 hidden flex-col items-center gap-3 bg-white p-4 shadow-[0_-4px_20px_rgba(0,0,0,0.15)]" style="display:none">
+    <p class="text-sm font-semibold">أضف لوحة التحكم إلى شاشتك الرئيسية</p>
+    <div id="pwa-install-android">
+      <div class="flex gap-3">
+        <button onclick="installPWA()" class="rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-bold text-white">ثبّت لوحة التحكم</button>
+        <button onclick="dismissPWAInstall()" class="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-600">لاحقًا</button>
+      </div>
+    </div>
+    <div id="pwa-install-ios" class="hidden flex-col items-center gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+      <p class="text-sm font-semibold text-slate-800">لتثبيت لوحة التحكم على iPhone:</p>
+      <ol class="text-sm text-slate-600 space-y-1 text-center">
+        <li>1. اضغط Share</li>
+        <li>2. اختر Add to Home Screen</li>
+        <li>3. اضغط Add</li>
+      </ol>
+      <button onclick="dismissPWAInstall()" class="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-600 mt-2">لاحقًا</button>
+    </div>
+  </div>
+  <script>
+  function isIOS() {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  }
+  if (isIOS() && !isPWAInstalled()) {
+    var androidDiv = document.getElementById('pwa-install-android');
+    var iosDiv = document.getElementById('pwa-install-ios');
+    if (androidDiv) { androidDiv.classList.add('hidden'); androidDiv.classList.remove('flex'); }
+    if (iosDiv) { iosDiv.classList.remove('hidden'); iosDiv.classList.add('flex'); }
+  }
+  if (!isPWAInstalled()) {
+    var installBtn = document.getElementById('admin-install-btn');
+    if (installBtn) { installBtn.style.display = ''; }
+  }
+  window.addEventListener('appinstalled', function() {
+    var installBtn = document.getElementById('admin-install-btn');
+    if (installBtn) { installBtn.style.display = 'none'; }
+  });
+</script>
 </body>
 </html>

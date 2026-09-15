@@ -1,14 +1,8 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
-
 <head>
-
 <meta charset="UTF-8">
-
-<meta
-name="viewport"
-content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 {% set theme = theme_colors(settings) %}
 <meta name="theme-color" content="{{ theme.primary }}">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -17,144 +11,107 @@ content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <link rel="manifest" href="/manifest.json">
 <link rel="icon" href="/static/favicon.png" type="image/png">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
-
-<title>
-
-{{ settings.restaurant_name if settings else "Restaurant" }}
-
-</title>
-
-<link rel="preconnect"
-href="https://fonts.googleapis.com">
-
-<link rel="preconnect"
-href="https://fonts.gstatic.com"
-crossorigin>
-
-<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap"
-rel="stylesheet">
-
+<title>{{ settings.restaurant_name if settings else "Restaurant" }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"></script>
-
 <script>
-
-tailwind.config={
-
-theme:{
-
-extend:{
-
-fontFamily:{
-
-cairo:["Cairo","sans-serif"]
-
-},
-
-colors:{
-
-primary:"{{ theme.primary }}",
-
-secondary:"{{ theme.secondary }}",
-
-accent:"{{ theme.accent }}",
-
-light:"#f8fafc"
-
-},
-
-boxShadow:{
-
-card:"0 10px 30px rgba(0,0,0,.08)"
-
-}
-
-}
-
-}
-
-}
-
+tailwind.config={theme:{extend:{fontFamily:{cairo:["Cairo","sans-serif"]},colors:{primary:"{{ theme.primary }}",secondary:"{{ theme.secondary }}",accent:"{{ theme.accent }}",light:"#f8fafc"},boxShadow:{card:"0 10px 30px rgba(0,0,0,.08")}}}}
 </script>
-
-<script defer
-src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
-
-<link rel="stylesheet"
-href="/static/css/app.css">
-
-<style>
-:root{
---color-primary:{{ theme.primary }};
---color-secondary:{{ theme.secondary }};
---color-accent:{{ theme.accent }};
-}
-</style>
-
+<script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<link rel="stylesheet" href="/static/css/app.css">
+<style>:root{--color-primary:{{ theme.primary }};--color-secondary:{{ theme.secondary }};--color-accent:{{ theme.accent }}</style>
 </head>
-
-<body class="min-h-screen font-cairo text-slate-800 antialiased selection:bg-primary selection:text-white"
-style="background: radial-gradient(circle at top, color-mix(in srgb, {{ theme.primary }} 12%, transparent), transparent 45%), linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)">
-
-{% block content %}
-
-{% endblock %}
-
+<body class="min-h-screen font-cairo text-slate-800 antialiased selection:bg-primary selection:text-white" style="background: radial-gradient(circle at top, color-mix(in srgb, {{ theme.primary }} 12%, transparent), transparent 45%), linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)">
+<a href="#" id="customer-install-btn" class="fixed top-3 left-3 z-40 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-lg hover:bg-emerald-700 transition" style="display:none">📱 تثبيت</a>
+{% block content %}{% endblock %}
 <script>
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/static/js/sw.js').catch(() => {});
-  });
+  window.addEventListener('load', () => { navigator.serviceWorker.register('/static/js/sw.js').catch(() => {}); });
 }
-
-const isPWAInstalled = () =>
-  window.matchMedia('(display-mode: standalone)').matches ||
-  window.navigator.standalone === true;
-
+const isPWAInstalled = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
 window.addEventListener('beforeinstallprompt', (e) => {
   if (isPWAInstalled()) return;
   e.preventDefault();
   window.deferredPrompt = e;
-  const banner = document.getElementById('pwa-install-banner');
-  if (banner) {
-    banner.classList.remove('hidden');
-    banner.classList.add('flex');
-  }
+  var banner = document.getElementById('pwa-install-banner');
+  if (banner) { banner.classList.remove('hidden'); banner.classList.add('flex'); }
 });
-
 window.addEventListener('appinstalled', () => {
   window.deferredPrompt = null;
-  const banner = document.getElementById('pwa-install-banner');
-  if (banner) {
-    banner.classList.add('hidden');
-    banner.classList.remove('flex');
-  }
+  var banner = document.getElementById('pwa-install-banner');
+  if (banner) { banner.classList.add('hidden'); banner.classList.remove('flex'); }
+  var installBtn = document.getElementById('customer-install-btn');
+  if (installBtn) { installBtn.style.display = 'none'; }
 });
-
 function dismissPWAInstall() {
-  const banner = document.getElementById('pwa-install-banner');
-  if (banner) {
-    banner.classList.add('hidden');
-    banner.classList.remove('flex');
-  }
+  var banner = document.getElementById('pwa-install-banner');
+  if (banner) { banner.classList.add('hidden'); banner.classList.remove('flex'); }
 }
-
+function isIOS() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+}
 async function installPWA() {
+  if (isIOS()) {
+    var iosDiv = document.getElementById('pwa-install-ios');
+    if (iosDiv) { iosDiv.classList.remove('hidden'); iosDiv.classList.add('flex'); }
+    return;
+  }
   if (!window.deferredPrompt) return;
   window.deferredPrompt.prompt();
-  const { outcome } = await window.deferredPrompt.userChoice;
+  var result = await window.deferredPrompt.userChoice;
   window.deferredPrompt = null;
   dismissPWAInstall();
 }
+function handleCustomerInstall(e) {
+  e.preventDefault();
+  if (isPWAInstalled()) return;
+  if (isIOS()) {
+    var iosDiv = document.getElementById('pwa-install-ios');
+    if (iosDiv) { iosDiv.classList.remove('hidden'); iosDiv.classList.add('flex'); }
+    return;
+  }
+  if (window.deferredPrompt) { installPWA(); }
+  else {
+    var iosDiv = document.getElementById('pwa-install-ios');
+    if (iosDiv) { iosDiv.classList.remove('hidden'); iosDiv.classList.add('flex'); }
+  }
+}
+document.addEventListener('DOMContentLoaded', function() {
+  if (!isPWAInstalled()) {
+    var installBtn = document.getElementById('customer-install-btn');
+    if (installBtn) { installBtn.style.display = ''; }
+  }
+  var installBtn = document.getElementById('customer-install-btn');
+  if (installBtn) {
+    installBtn.addEventListener('click', handleCustomerInstall);
+  }
+  if (isIOS() && !isPWAInstalled()) {
+    var androidDiv = document.getElementById('pwa-install-android');
+    var iosDiv = document.getElementById('pwa-install-ios');
+    if (androidDiv) { androidDiv.classList.add('hidden'); androidDiv.classList.remove('flex'); }
+    if (iosDiv) { iosDiv.classList.remove('hidden'); iosDiv.classList.add('flex'); }
+  }
+});
 </script>
-
 <div id="pwa-install-banner" class="fixed bottom-0 left-0 right-0 z-50 hidden flex-col items-center gap-3 bg-white p-4 shadow-[0_-4px_20px_rgba(0,0,0,0.15)]" style="display:none">
   <p class="text-sm font-semibold">أضف التطبيق إلى شاشتك الرئيسية</p>
-  <div class="flex gap-3">
-    <button onclick="installPWA()" class="rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-bold text-white">ثبّت التطبيق</button>
-    <button onclick="dismissPWAInstall()" class="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-600">لاحقًا</button>
+  <div id="pwa-install-android">
+    <div class="flex gap-3">
+      <button onclick="installPWA()" class="rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-bold text-white">ثبّت التطبيق</button>
+      <button onclick="dismissPWAInstall()" class="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-600">لاحقًا</button>
+    </div>
+  </div>
+  <div id="pwa-install-ios" class="hidden flex-col items-center gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+    <p class="text-sm font-semibold text-slate-800">لتثبيت التطبيق على iPhone:</p>
+    <ol class="text-sm text-slate-600 space-y-1 text-center">
+      <li>1. اضغط زر Share</li>
+      <li>2. اختر Add to Home Screen</li>
+      <li>3. اضغط Add</li>
+    </ol>
+    <button onclick="dismissPWAInstall()" class="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-600 mt-2">لاحقًا</button>
   </div>
 </div>
-
 </body>
-
 </html>

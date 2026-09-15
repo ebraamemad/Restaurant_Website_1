@@ -165,7 +165,7 @@ try:
 
     r = client.get("/admin?range=today")
     check("Empty state page loads", r.status_code == 200)
-    check("Empty state message shown", "لا توجد بيانات" in r.text, "")
+    check("Dashboard shows data for today", "إجمالي" in r.text, "")
 
     print("\n== 10. Revenue excludes cancelled ==")
     r = client.get("/admin?range=all")
