@@ -61,6 +61,7 @@
           <th class="p-3">التاريخ</th>
           <th class="p-3">الإجمالي</th>
           <th class="p-3">طريقة الاستلام</th>
+          <th class="p-3">طريقة الدفع</th>
           <th class="p-3">التفاصيل</th>
         </tr>
       </thead>
@@ -72,6 +73,7 @@
           <td class="p-3 text-slate-500">{{ order.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
           <td class="p-3 font-bold">{{ order.total }} {{ settings.currency }}</td>
           <td class="p-3">{{ order.delivery_option.name if order.delivery_option else "\u2014" }}</td>
+          <td class="p-3">{{ payment_labels.get(order.payment_method, order.payment_method) if order.payment_method else "\u2014" }}</td>
           <td class="p-3 text-slate-500">{{ order.items|length }} منتج</td>
         </tr>
         {% endfor %}

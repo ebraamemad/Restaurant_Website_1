@@ -77,7 +77,7 @@ if __name__ == "__main__":
     d = DeliveryOption(name="توصيل", fee=Decimal("10"), delivery_type="fixed", is_active=True)
     db.add(d)
     db.flush()
-    dz = DeliveryZone(name="منطقة RL", fee=Decimal("10"), is_active=True)
+    dz = DeliveryZone(name=f"منطقة RL {unique_id}", fee=Decimal("10"), is_active=True)
     db.add(dz)
     db.flush()
     db.commit()

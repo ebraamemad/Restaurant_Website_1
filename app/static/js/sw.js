@@ -1,5 +1,6 @@
-const CACHE_NAME = 'restaurant-cache-v1';
+const CACHE_NAME = 'restaurant-cache-v2';
 const STATIC_ASSETS = [
+  '/static/css/tailwind.css',
   '/static/css/app.css',
   '/static/js/cart.js',
   '/static/icons/icon-192.png',

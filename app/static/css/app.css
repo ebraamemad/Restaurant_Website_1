@@ -56,17 +56,23 @@ img{
   word-break:break-word;
 }
 
-.product-image{
-  aspect-ratio:1/1;
+/* صورة كارت المنتج في واجهة العميل:
+   موبايل = صف أفقي مع صورة مربعة مضغوطة بجانب المحتوى
+   تابلت   = حجم متوسط حسب شبكة العمودين
+   ديسكتوب = نفس المظهر الحالي (4/3) */
+.product-card-media{
+  aspect-ratio:4/3;
   object-fit:cover;
-  height:clamp(108px, 26vw, 210px);
-  max-height:none;
-  min-height:0;
   width:100%;
+  height:auto;
 }
 
 @media (max-width: 639px){
-  .product-image{height:clamp(104px, 30vw, 142px);}
+  .product-card-media{
+    aspect-ratio:1/1;
+    width:clamp(84px, 24vw, 96px);
+    height:clamp(84px, 24vw, 96px);
+  }
 }
 
 .chip-scroll{
@@ -87,7 +93,6 @@ button:active, a:active{
 
 @media (max-width: 430px){
   .section{padding-left:10px; padding-right:10px;}
-  .product-image{height:clamp(92px, 31vw, 133px);}
 }
 
 @media (max-width: 639px){
@@ -95,6 +100,34 @@ button:active, a:active{
   .product-card-title{font-size:.8rem; line-height:1.35;}
   .product-card-action{min-height:44px; line-height:1.2;}
   .mobile-cart-sheet{padding-bottom:calc(1rem + env(safe-area-inset-bottom, 0px));}
+  /* Mobile: full-width vertical product cards */
+  #products .flex.flex-col > .card,
+  #products .flex.sm\\:grid > .card{
+    width:100%;
+    max-width:100%;
+  }
+  /* Product grid vertical on mobile */
+  #products .flex.flex-col{
+    gap:0.75rem;
+  }
+  /* Category heading mobile */
+  #products section h2{
+    font-size:1.1rem;
+  }
+  /* Admin tables: stack on mobile */
+  .admin-table-wrap{
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+  }
+  /* Admin forms: full width on mobile */
+  .admin-form-grid{
+    grid-template-columns:1fr !important;
+  }
+  /* Touch targets for admin buttons */
+  .admin-btn{
+    min-height:44px;
+    min-width:44px;
+  }
 }
 
 .eyebrow{

@@ -22,12 +22,12 @@
 
         </div>
 
-        <!-- عمودين على الموبايل: كروت أصغر وأكثر ترتيبًا -->
-        <div class="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
+        <!-- عمود واحد على المobs: كروت كاملة العرض -->
+        <div class="flex flex-col gap-3 sm:grid sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
 
             {% for product in category.products %}
 
-                {% if product.is_active and product.is_available %}
+                {% if product.is_active %}
 
                     {% include "public/partials/product_card.html" %}
 
@@ -43,11 +43,11 @@
 
 {% elif products %}
 
-    <div class="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
+    <div class="flex flex-col gap-3 sm:grid sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
 
         {% for product in products %}
 
-            {% if product.is_active and product.is_available %}
+            {% if product.is_active %}
 
                 {% include "public/partials/product_card.html" %}
 

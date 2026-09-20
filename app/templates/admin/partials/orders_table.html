@@ -11,6 +11,7 @@
           <td class="p-3">{{ order.id }}</td>
           <td class="p-3">{{ order.customer_name }}<br><span class="text-slate-500">{{ order.customer_address or "استلام من المطعم" }}</span>
             {% if order.delivery_option %}<div class="text-xs text-indigo-600">{{ order.delivery_option.name }}</div>{% endif %}
+            {% if order.payment_method %}<div class="text-xs text-emerald-700">الدفع: {{ payment_labels.get(order.payment_method, order.payment_method) }}</div>{% endif %}
             {% if order.pickup_time %}<div class="text-xs text-slate-500">موعد: {{ order.pickup_time.strftime("%Y-%m-%d %H:%M") }}</div>{% endif %}
             {% if order.coupon %}<div class="text-xs text-emerald-700">كوبون: {{ order.coupon.code }}</div>{% endif %}
           </td>

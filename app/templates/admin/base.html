@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>لوحة التحكم</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/css/tailwind.css">
+  <style>:root{--color-primary-rgb:5 150 105;--color-secondary-rgb:4 120 87;--color-accent-rgb:245 158 11}</style>
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/static/favicon.png" type="image/png">
   <meta name="theme-color" content="#10b981">
@@ -17,16 +18,17 @@
       <div class="flex flex-wrap items-center justify-between gap-3">
         <a href="/admin" class="text-lg font-extrabold text-emerald-700 sm:text-xl">لوحة المطعم</a>
         <div class="flex flex-wrap gap-1.5 text-xs font-semibold sm:gap-2 sm:text-sm">
-          <a href="/admin/categories" class="rounded-full px-2.5 py-2 transition hover:bg-slate-100 sm:px-3">الأقسام</a>
-          <a href="/admin/products" class="rounded-full px-2.5 py-2 transition hover:bg-slate-100 sm:px-3">المنتجات</a>
+          <a href="/admin" class="rounded-full px-2.5 py-2 transition hover:bg-slate-100 sm:px-3 {% if request.url.path == '/admin' %}bg-slate-100{% endif %}">الرئيسية</a>
+          <a href="/admin/categories" class="rounded-full px-2.5 py-2 transition hover:bg-slate-100 sm:px-3 {% if request.url.path.startswith('/admin/categories') %}bg-slate-100{% endif %}">الأقسام</a>
+          <a href="/admin/products" class="rounded-full px-2.5 py-2 transition hover:bg-slate-100 sm:px-3 {% if request.url.path.startswith('/admin/products') %}bg-slate-100{% endif %}">المنتجات</a>
         </div>
       </div>
       <div class="flex flex-wrap gap-1 text-xs font-semibold sm:gap-2 sm:text-sm">
-          <a href="/admin/orders" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2">الطلبات</a>
-          <a href="/admin/customers" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2">العملاء</a>
-          <a href="/admin/delivery-options" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2">التوصيل والاستلام</a>
-          <a href="/admin/settings" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2">الإعدادات</a>
-          <a href="/admin/coupons" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2">الكوبونات</a>
+          <a href="/admin/orders" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/orders') %}bg-slate-100{% endif %}">الطلبات</a>
+          <a href="/admin/customers" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/customers') %}bg-slate-100{% endif %}">العملاء</a>
+          <a href="/admin/delivery-options" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/delivery-options') %}bg-slate-100{% endif %}">التوصيل والاستلام</a>
+          <a href="/admin/settings" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/settings') %}bg-slate-100{% endif %}">الإعدادات</a>
+          <a href="/admin/coupons" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/coupons') %}bg-slate-100{% endif %}">الكوبونات</a>
         <a href="#" id="admin-install-btn" class="rounded-full px-2.5 py-2 transition bg-emerald-100 text-emerald-700 hover:bg-emerald-200 sm:px-3" style="display:none">📱 تثبيت</a>
         <form method="post" action="/admin/logout">{{ csrf_field(request) }}<button class="rounded-full px-2.5 py-2 text-red-600 transition hover:bg-red-50 sm:px-3">خروج</button></form>
       </div>
@@ -98,7 +100,7 @@
   });
 </script>
 
-<div id="pwa-install-banner" class="fixed bottom-0 left-0 right-0 z-50 hidden flex-col items-center gap-3 bg-white p-4 shadow-[0_-4px_20px_rgba(0,0,0,0.15)]" style="display:none">
+<div id="pwa-install-banner" class="fixed bottom-0 left-0 right-0 z-50 hidden flex-col items-center gap-3 bg-white p-4 shadow-[0_-4px_20px_rgba(0,0,0,0.15)]">
     <p class="text-sm font-semibold">أضف لوحة التحكم إلى شاشتك الرئيسية</p>
     <div id="pwa-install-android">
       <div class="flex gap-3">

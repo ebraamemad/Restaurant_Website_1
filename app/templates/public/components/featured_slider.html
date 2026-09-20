@@ -1,14 +1,14 @@
 {% set ns = namespace(featured=[]) %}
-{% for product in products if product.is_featured and product.is_active and product.is_available %}
+{% for product in products if product.is_featured and product.is_active %}
     {% set ns.featured = ns.featured + [product] %}
 {% endfor %}
 {% if not ns.featured %}
-    {% for product in products if product.is_active and product.is_available and product.image_url %}
+    {% for product in products if product.is_active and product.image_url %}
         {% set ns.featured = ns.featured + [product] %}
     {% endfor %}
 {% endif %}
 {% if not ns.featured %}
-    {% for product in products if product.is_active and product.is_available %}
+    {% for product in products if product.is_active %}
         {% set ns.featured = ns.featured + [product] %}
     {% endfor %}
 {% endif %}

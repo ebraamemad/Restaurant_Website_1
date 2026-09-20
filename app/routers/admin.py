@@ -35,6 +35,7 @@ from app.models import (
 from app.schemas import OrderStatus
 from app.security import csrf_field
 from app.utils import (
+    PAYMENT_METHOD_LABELS,
     THEME_DEFAULTS,
     build_search_variants,
     build_whatsapp_url,
@@ -51,6 +52,7 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.globals["csrf_field"] = csrf_field
 templates.env.globals["theme_colors"] = parse_theme_colors
 templates.env.globals["whatsapp_url"] = lambda phone: build_whatsapp_url(phone, "")
+templates.env.globals["payment_labels"] = PAYMENT_METHOD_LABELS
 UPLOADS_DIR = Path(__file__).resolve().parents[1] / "uploads"
 STATUS_LABELS = {
     OrderStatus.pending.value: "قيد الانتظار",
@@ -437,13 +439,7 @@ def delete_product(product_id: int, db: Session = Depends(get_db)) -> RedirectRe
     if product is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Product not found")
     db.delete(product)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        product.is_active = False
-        db.add(product)
-        db.commit()
+    db.commit()
     return redirect("/admin/products")
 
 
@@ -997,6 +993,10 @@ def save_delivery_option(
     option.sort_order = sort_order
     option.delivery_type = delivery_type
     option.is_active = is_active
+    if delivery_type == "zone":
+        zone_count = db.scalar(select(func.count(DeliveryZone.id)).where(DeliveryZone.is_active.is_(True)))
+        if zone_count == 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "لا يمكن تفعيل التوصيل حسب المنطقة قبل إضافة منطقة توصيل واحدة على الأقل")
     db.add(option)
     db.commit()
     return redirect("/admin/delivery-options")

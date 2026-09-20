@@ -1,11 +1,11 @@
 {% set has_options = (product.option_groups | default([]) | length > 0) or (product.options | default([]) | length > 0) %}
-<div class="card group flex cursor-pointer flex-col overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-xl active:scale-[0.98]"
+<div class="card group flex cursor-pointer flex-row items-stretch gap-3 overflow-hidden p-3 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl active:scale-[0.98] sm:flex-col sm:items-stretch sm:gap-0 sm:p-0"
     onclick="window.location.href='/products/{{ product.slug }}'"
     role="link" tabindex="0"
     aria-label="عرض تفاصيل {{ product.name }}"
     onkeydown="if(event.key==='Enter')window.location.href='/products/{{ product.slug }}'">
   {% if product.image_url %}
-  <div class="relative aspect-[4/3] overflow-hidden">
+  <div class="product-card-media relative shrink-0 overflow-hidden">
     <img src="{{ product.image_url }}" alt="{{ product.name }}"
       class="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
       loading="lazy" decoding="async">
@@ -17,37 +17,46 @@
     {% endif %}
   </div>
   {% else %}
-  <div class="product-image flex aspect-[4/3] items-center justify-center bg-slate-200 text-3xl font-semibold text-slate-500" aria-hidden="true">🍽</div>
+  <div class="product-card-media flex items-center justify-center bg-slate-200 text-2xl font-semibold text-slate-500 sm:text-3xl" aria-hidden="true">🍽</div>
   {% endif %}
-  <div class="product-card-content flex min-h-[130px] flex-1 flex-col p-2.5">
+  <div class="product-card-content flex min-w-0 flex-1 flex-col p-2.5 sm:min-h-[130px] sm:p-2.5">
     {% if product.is_featured %}
     <span class="mb-1 self-start rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">⭐ مميز</span>
     {% endif %}
-    <h3 class="product-card-title line-clamp-2 text-sm font-bold leading-6 transition group-hover:text-primary">{{ product.name }}</h3>
+    <h3 class="product-card-title line-clamp-2 text-sm font-bold leading-5 transition group-hover:text-primary sm:leading-6 sm:text-sm">{{ product.name }}</h3>
+    {% if not product.is_available %}
+    <span class="mt-1 inline-block rounded bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">غير متاح</span>
+    {% endif %}
     {% if product.description %}
-    <p class="mt-1 hidden text-xs leading-5 text-slate-500 line-clamp-2 sm:block sm:text-sm">{{ product.description }}</p>
+    <p class="mt-1 line-clamp-1 text-xs leading-5 text-slate-500 sm:line-clamp-2 sm:text-sm">{{ product.description }}</p>
     {% endif %}
-    <div class="mt-auto flex items-end justify-between gap-2 pt-3">
-      {% if product.is_offer %}
-      <div class="flex items-center gap-2">
-        <p class="price-num text-lg font-extrabold text-primary sm:text-xl">{% if product.base_price != "0.00" and product.base_price != "0" %}{{ product.base_price }}{% else %}حسب الاختيار{% endif %}</p>
-        <span class="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-600">عرض</span>
+    <div class="mt-auto pt-2 sm:pt-3">
+      <div class="flex flex-wrap items-center justify-between gap-2 sm:flex-col sm:items-stretch sm:gap-0 sm:flex-nowrap">
+        <div class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 sm:w-full sm:justify-between">
+          {% if product.is_offer %}
+          <div class="flex items-center gap-2">
+            <p class="price-num text-lg font-extrabold text-primary sm:text-xl">{% if product.base_price != "0.00" and product.base_price != "0" %}{{ product.base_price }}{% else %}حسب الاختيار{% endif %}</p>
+            <span class="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-600">عرض</span>
+          </div>
+          {% else %}
+          <p class="price-num text-lg font-extrabold text-primary sm:text-xl">{% if product.base_price != "0.00" and product.base_price != "0" %}{{ product.base_price }}{% else %}حسب الاختيار{% endif %}</p>
+          {% endif %}
+          <span class="block text-[10px] leading-tight text-slate-500 sm:text-xs">{{ settings.currency }}{% if product.unit %} / {{ product.unit }}{% endif %}</span>
+        </div>
+        {% if has_options %}
+        <a href="/products/{{ product.slug }}" onclick="event.stopPropagation()"
+          class="product-card-action flex shrink-0 items-center justify-center gap-1 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-[11px] font-bold text-primary transition duration-200 hover:bg-primary hover:text-white sm:mt-2 sm:w-full sm:flex-nowrap sm:rounded-2xl sm:border-0 sm:bg-primary sm:py-3 sm:text-base sm:text-white sm:hover:bg-secondary">
+          <span class="sm:hidden">خيارات</span>
+          <span class="hidden sm:inline">اختر الخيارات</span>
+        </a>
+        {% else %}
+        <button type="button" @click.stop='add({ id: {{ product.id }}, name: {{ product.name|tojson|safe }}, base_price: {{ product.base_price }}, quantity: 1 })'
+          class="product-card-action flex shrink-0 items-center justify-center gap-1 rounded-xl bg-primary px-3 py-2 text-[11px] font-bold text-white shadow-sm transition duration-200 hover:bg-secondary sm:mt-2 sm:w-full sm:flex-nowrap sm:rounded-2xl sm:py-3 sm:text-base">
+          <span class="sm:hidden">+ أضف</span>
+          <span class="hidden sm:inline">أضف للسلة</span>
+        </button>
+        {% endif %}
       </div>
-      {% else %}
-      <p class="price-num text-lg font-extrabold text-primary sm:text-xl">{% if product.base_price != "0.00" and product.base_price != "0" %}{{ product.base_price }}{% else %}حسب الاختيار{% endif %}</p>
-      {% endif %}
-      <span class="block text-[10px] leading-tight text-slate-500 sm:text-xs">{{ settings.currency }}{% if product.unit %} / {{ product.unit }}{% endif %}</span>
     </div>
-    {% if has_options %}
-    <a href="/products/{{ product.slug }}" onclick="event.stopPropagation()"
-      class="product-card-action mt-2 flex w-full items-center justify-center rounded-xl bg-primary px-2 py-2 text-center text-[11px] font-bold text-white shadow-sm transition duration-200 hover:bg-secondary sm:rounded-2xl sm:py-3 sm:text-base">
-      اختر الخيارات
-    </a>
-    {% else %}
-    <button type="button" @click.stop='add({ id: {{ product.id }}, name: {{ product.name|tojson|safe }}, base_price: {{ product.base_price }}, quantity: 1 })'
-      class="product-card-action mt-2 flex w-full items-center justify-center gap-1 rounded-xl bg-primary px-2 py-2 text-[11px] font-bold text-white shadow-sm transition duration-200 hover:bg-secondary sm:rounded-2xl sm:py-3 sm:text-base">
-      أضف للسلة
-    </button>
-    {% endif %}
   </div>
 </div>

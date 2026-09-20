@@ -32,8 +32,56 @@ def og():
         s.close()
 
 
+PHONE = "01090000001"
+
+
+def cleanup():
+    """Remove all artifacts this test creates, making it idempotent and safe to re-run."""
+    phone_e164 = "201" + PHONE[1:]
+    phone_plus = "+201" + PHONE[1:]
+    with engine.connect() as conn:
+        trans = conn.begin()
+        try:
+            conn.execute(
+                text("DELETE FROM order_item_addons WHERE order_item_id IN "
+                     "(SELECT id FROM order_items WHERE order_id IN "
+                     "(SELECT id FROM orders WHERE customer_phone IN (:p1, :p2, :p3)))"),
+                {"p1": PHONE, "p2": phone_e164, "p3": phone_plus},
+            )
+            conn.execute(
+                text("DELETE FROM order_item_options WHERE order_item_id IN "
+                     "(SELECT id FROM order_items WHERE order_id IN "
+                     "(SELECT id FROM orders WHERE customer_phone IN (:p1, :p2, :p3)))"),
+                {"p1": PHONE, "p2": phone_e164, "p3": phone_plus},
+            )
+            conn.execute(
+                text("DELETE FROM order_items WHERE order_id IN "
+                     "(SELECT id FROM orders WHERE customer_phone IN (:p1, :p2, :p3))"),
+                {"p1": PHONE, "p2": phone_e164, "p3": phone_plus},
+            )
+            conn.execute(
+                text("DELETE FROM orders WHERE customer_phone IN (:p1, :p2, :p3)"),
+                {"p1": PHONE, "p2": phone_e164, "p3": phone_plus},
+            )
+            conn.execute(text("DELETE FROM customers WHERE phone = '1090000001'"))
+            conn.execute(text("DELETE FROM coupons WHERE code = 'RACE10'"))
+            conn.execute(text("DELETE FROM products WHERE slug = 'rc-p'"))
+            conn.execute(text("DELETE FROM categories WHERE slug = 'rc-cat'"))
+            conn.execute(text("DELETE FROM delivery_options WHERE name = 'D'"))
+            conn.execute(text("DELETE FROM delivery_zones WHERE name = 'RZ'"))
+            conn.execute(text("DELETE FROM restaurant_settings WHERE restaurant_name = 'X'"))
+            conn.execute(text("DELETE FROM admins WHERE username = 'rc'"))
+            trans.commit()
+        except Exception:
+            trans.rollback()
+            raise
+
+
 # Don't override get_db - let TestClient use the normal one
 # But we need to seed the database
+
+# Make sure no leftovers from a previous run break the seed (idempotent setup)
+cleanup()
 
 # Seed using the normal session
 sess = SL()
@@ -61,7 +109,6 @@ sess.add(coupon)
 sess.commit()
 sess.close()
 
-PHONE = "01090000001"
 results = []
 
 
@@ -97,21 +144,4 @@ else:
     print("Unexpected: no successes")
 
 # Cleanup
-with engine.connect() as conn:
-    trans = conn.begin()
-    try:
-        conn.execute(text("DELETE FROM order_item_addons WHERE order_item_id IN (SELECT id FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE customer_phone = '01090000001' OR customer_phone LIKE '201090000001' OR customer_phone LIKE '+201090000001'))"))
-        conn.execute(text("DELETE FROM order_item_options WHERE order_item_id IN (SELECT id FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE customer_phone = '01090000001' OR customer_phone LIKE '201090000001' OR customer_phone LIKE '+201090000001'))"))
-        conn.execute(text("DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE customer_phone = '01090000001' OR customer_phone LIKE '201090000001' OR customer_phone LIKE '+201090000001')"))
-        conn.execute(text("DELETE FROM orders WHERE customer_phone = '01090000001' OR customer_phone LIKE '201090000001' OR customer_phone LIKE '+201090000001'"))
-        conn.execute(text("DELETE FROM customers WHERE phone = '1090000001'"))
-        conn.execute(text("DELETE FROM coupons WHERE code = 'RACE10'"))
-        conn.execute(text("DELETE FROM products WHERE slug = 'rc-p'"))
-        conn.execute(text("DELETE FROM categories WHERE slug = 'rc-cat'"))
-        conn.execute(text("DELETE FROM delivery_options WHERE name = 'D'"))
-        conn.execute(text("DELETE FROM restaurant_settings WHERE restaurant_name = 'X'"))
-        conn.execute(text("DELETE FROM admins WHERE username = 'rc'"))
-        trans.commit()
-    except Exception:
-        trans.rollback()
-        raise
+cleanup()
