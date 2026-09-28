@@ -3,9 +3,27 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import List, Literal, Optional
+from typing import Annotated, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+
+from app.utils import PHONE_MAX_INPUT_LENGTH, validate_customer_phone
+
+# رقم الموبايل المصري: بيتحقق من صحته على مستوى الـschema قبل أي منطق أعمال.
+# ValidationError بتتحول لـ422 مع رسالة عربية واضحة بدل 500.
+CustomerPhone = Annotated[
+    str,
+    Field(max_length=PHONE_MAX_INPUT_LENGTH),
+    AfterValidator(validate_customer_phone),
+]
+
+# نسخة اختيارية لنسخ الـAPI اللي بتقبل الهاتف ممكن يكون فاضي
+# (مثل معاينة الطلب قبل ما العميل يكتب هاتفه).
+OptionalCustomerPhone = Annotated[
+    Optional[str],
+    Field(max_length=PHONE_MAX_INPUT_LENGTH),
+    AfterValidator(lambda value: validate_customer_phone(value) if value is not None else None),
+]
 
 
 class OrderStatus(str, Enum):
@@ -13,6 +31,20 @@ class OrderStatus(str, Enum):
     preparing = "preparing"
     delivered = "delivered"
     cancelled = "cancelled"
+
+
+class OrderChannel(str, Enum):
+    """قناة الطلب — بتوصف إزاي الطلب بدأ، مش إيه نوعه.
+
+    `system`: العميل عمل الطلب من الموقع، والطلب شايف في لوحة التحكم.
+    `whatsapp`: العميل عمل الطلب من الموقع، وبعدين حوّلناه لواتساب.
+
+    الحالتين بيخلّوا نفس صف الـ`Order` — مفيش طلبات واتساب في داتابيز
+    منفصلة. الفرق في التحويل بس.
+    """
+
+    system = "system"
+    whatsapp = "whatsapp"
 
 
 class CategoryForm(BaseModel):
@@ -66,7 +98,7 @@ class CartItemIn(BaseModel):
 
 class OrderCreate(BaseModel):
     customer_name: str = Field(min_length=2, max_length=120)
-    customer_phone: str = Field(min_length=8, max_length=30)
+    customer_phone: CustomerPhone
     # العنوان اختياري عشان طلبات الاستلام من المطعم مش محتاجة عنوان.
     customer_address: Optional[str] = Field(default=None, min_length=5, max_length=350)
     notes: Optional[str] = Field(default=None, max_length=1000)
@@ -76,6 +108,11 @@ class OrderCreate(BaseModel):
     coupon_code: Optional[str] = Field(default=None, max_length=50)
     pickup_time: Optional[datetime] = None
     payment_method: Literal["cash", "ewallet", "card"] = "cash"
+    # الفرع: اختياري هنا على السكيما عشان مابكسرش أي عميل قديم بيبعت
+    # طلب من غير فرع. لو مبعتش، السيرفر بيرجعله الفرع الافتراضي، والعمود
+    # نفسه NOT NULL في الداتابيز، فمفيش طريقة يفضل فيها طلب من غير فرع.
+    branch_id: Optional[int] = Field(default=None, gt=0)
+    channel: OrderChannel = OrderChannel.whatsapp
 
 
 class OrderCreated(BaseModel):
@@ -86,7 +123,43 @@ class OrderCreated(BaseModel):
     delivery_fee: Decimal
     total: Decimal
     currency: str
-    whatsapp_url: str
+    branch_id: int
+    channel: str
+    # بيتقبل في طلبات `system` بس. طلبات `whatsapp` بترجّع الرابط.
+    whatsapp_url: Optional[str] = None
+
+
+class BranchOut(BaseModel):
+    """فرع ظاهر للعميل. الفروع غير المفعّلة مش بتظهر خالص."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    address: Optional[str]
+    phone: Optional[str]
+    opening_hours: Optional[str]
+
+
+class BranchForm(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    address: Optional[str] = Field(default=None, max_length=300)
+    phone: Optional[str] = Field(default=None, max_length=30)
+    opening_hours: Optional[str] = Field(default=None, max_length=250)
+    is_active: bool = True
+
+
+class OrderingStatusOut(BaseModel):
+    """حالة استقبال الطلبات دلوقتي — عشان العميل يقدر يتفرج/lمّا مقفول.
+
+    الساعات دي globals على مستوى المطعم كله، مش على مستوى الفرع.
+    """
+
+    is_open: bool
+    open_time: Optional[str] = None  # "HH:MM"
+    close_time: Optional[str] = None  # "HH:MM"
+    overnight: bool = False  # الراحة بتعدّي نص الليل (18:00 → 02:00)
+    message: str = ""
 
 
 class DeliveryOptionOut(BaseModel):
@@ -150,13 +223,13 @@ class OrderPreviewIn(BaseModel):
     delivery_option_id: Optional[int] = Field(default=None, gt=0)
     delivery_zone_id: Optional[int] = Field(default=None, gt=0)
     coupon_code: Optional[str] = Field(default=None, max_length=50)
-    customer_phone: Optional[str] = Field(default=None, max_length=30)
+    customer_phone: OptionalCustomerPhone = None
 
 
 class CouponValidateIn(BaseModel):
     code: str = Field(min_length=1, max_length=50)
     items: List[CartItemIn] = Field(min_length=1)
-    customer_phone: Optional[str] = Field(default=None, max_length=30)
+    customer_phone: OptionalCustomerPhone = None
 
 
 class CouponValidateOut(BaseModel):

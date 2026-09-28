@@ -9,6 +9,22 @@
 
     <form class="space-y-3.5" @submit.prevent="submitOrder()">
 
+        <!-- الفرع: أي فرع تخدمه فعلاً. القائمة بتجيب الفروع المفعّلة بس،
+             والـdefault بيتحطّ تلقائياً لو العميل مختارش حاجة. -->
+        <div x-show="branches.length > 0">
+            <label class="block text-sm font-bold">الفرع
+                <select x-model.number="selectedBranchId" @change="onCheckoutChange()"
+                    class="mt-1 w-full rounded-xl border p-3.5">
+                    <template x-for="branch in branches" :key="branch.id">
+                        <option :value="branch.id" x-text="branch.name + (branch.address ? ' — ' + branch.address : '')"></option>
+                    </template>
+                </select>
+            </label>
+            <p class="mt-1 text-xs text-slate-400" x-show="selectedBranch()?.phone">
+                <span x-text="selectedBranch()?.phone"></span>
+            </p>
+        </div>
+
         <!-- طريقة الاستلام: توصيل / استلام -->
         <div x-show="deliveryOptions.length > 0">
             <p class="mb-2 text-sm font-bold">طريقة الاستلام</p>
@@ -62,12 +78,17 @@
         </div>
 
         <!-- بيانات العميل -->
-        <input x-model="customer.name" required placeholder="الاسم" class="w-full rounded-xl border p-3.5">
-        <input x-model="customer.phone" required placeholder="رقم الهاتف" class="w-full rounded-xl border p-3.5">
+        <input x-model="customer.name" required minlength="2" maxlength="120" placeholder="الاسم"
+            class="w-full rounded-xl border p-3.5">
+        <input x-model="customer.phone" required type="tel" inputmode="tel" autocomplete="tel-national"
+            maxlength="30" placeholder="رقم الهاتف (01012345678)"
+            class="w-full rounded-xl border p-3.5">
         <template x-if="!isPickup()">
-            <input x-model="customer.address" required placeholder="العنوان" class="w-full rounded-xl border p-3.5">
+            <input x-model="customer.address" required minlength="5" maxlength="350" placeholder="العنوان"
+                class="w-full rounded-xl border p-3.5">
         </template>
-        <textarea x-model="customer.notes" rows="2" placeholder="ملاحظات عامة (اختياري)" class="w-full rounded-xl border p-3.5"></textarea>
+        <textarea x-model="customer.notes" rows="2" maxlength="1000"
+            placeholder="ملاحظات عامة (اختياري)" class="w-full rounded-xl border p-3.5"></textarea>
 
         <!-- كوبون الخصم -->
         <div>
@@ -119,11 +140,33 @@
             </div>
         </div>
 
+        <!-- طريقة تأكيد الطلب: جوه الموقع أو تحويل لواتساب.
+             الاتنين بيخزنوا نفس الـOrder في الداتابيز — الفرق في الإرسال بس. -->
+        <div>
+            <p class="mb-2 text-sm font-bold">إرسال الطلب</p>
+            <div class="grid grid-cols-2 gap-2">
+                <label
+                    class="touch-target flex cursor-pointer flex-col items-center justify-center gap-0.5 rounded-xl border p-3 text-center transition"
+                    :class="orderChannel === 'system' ? 'border-primary bg-primary/5' : 'border-slate-200 hover:border-primary/40'">
+                    <input type="radio" name="order-channel" value="system" x-model="orderChannel" class="sr-only">
+                    <span class="text-sm font-bold">تأكيد في الموقع</span>
+                    <span class="text-[11px] text-slate-400">الطلب يوصلنا على طول</span>
+                </label>
+                <label
+                    class="touch-target flex cursor-pointer flex-col items-center justify-center gap-0.5 rounded-xl border p-3 text-center transition"
+                    :class="orderChannel === 'whatsapp' ? 'border-primary bg-primary/5' : 'border-slate-200 hover:border-primary/40'">
+                    <input type="radio" name="order-channel" value="whatsapp" x-model="orderChannel" class="sr-only">
+                    <span class="text-sm font-bold">إرسال عبر واتساب</span>
+                    <span class="text-[11px] text-slate-400">هنحوّلك لواتساب ونتأكد</span>
+                </label>
+            </div>
+        </div>
+
         <button
             :disabled="items.length===0||loading"
             class="touch-target flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-4 font-bold text-white transition hover:bg-secondary disabled:opacity-50 active:scale-[0.98]">
             <span x-show="loading" class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
-            <span x-text="loading ? 'جاري الإرسال...' : 'إرسال الطلب عبر واتساب'"></span>
+            <span x-text="loading ? 'جاري الإرسال...' : (orderChannel === 'whatsapp' ? 'إرسال الطلب عبر واتساب' : 'تأكيد الطلب')"></span>
         </button>
 
         <p class="text-center text-red-500" x-text="error"></p>

@@ -18,6 +18,22 @@ ALGORITHM = "HS256"
 AUTH_COOKIE_NAME = "admin_access_token"
 CSRF_COOKIE_NAME = "admin_csrf"
 
+# بيتحسب مرة واحدة عند أول استخدام (مش وقت الاستيراد) عشان متزودش زمن إقلاع.
+_dummy_hash: Optional[str] = None
+
+
+def _get_dummy_hash() -> str:
+    """bcrypt hash لقيمة عشوائية.
+
+    بيتستخدم لما اليوزر مش موجود: بنعمل verify كامل بنفس الشغل بالظبط
+    عشان زمن الرد يبقى واحد سواء اليوزر موجود أو لأ، فمفيش timing side
+    channel يكشف اليوزرهات الموجودة.
+    """
+    global _dummy_hash
+    if _dummy_hash is None:
+        _dummy_hash = pwd_context.hash(secrets.token_urlsafe(32))
+    return _dummy_hash
+
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
@@ -25,6 +41,15 @@ def hash_password(password: str) -> str:
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
     return pwd_context.verify(plain_password, password_hash)
+
+
+def verify_login_credentials(password: str, password_hash: Optional[str]) -> bool:
+    """تحقق وحيد من بيانات الدخول.
+
+    لو الـhash مش موجود (يوزر مش موجود أو معطّل) بنعمل verify ضد hash وهمي
+    بدل ما نرجّع False فورًا — عشان التوقيت ما يفضحش وجود اليوزر.
+    """
+    return pwd_context.verify(password, password_hash or _get_dummy_hash())
 
 
 def create_access_token(subject: str) -> str:

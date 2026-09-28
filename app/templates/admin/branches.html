@@ -1,0 +1,70 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<h1 class="mb-2 text-2xl font-bold">الفروع</h1>
+<p class="mb-5 text-sm text-slate-500">
+  كل طلب لازم يكون مربوط بفرع. الفرع المعطّل بيختفي من صفحة العميل، ومش
+  حد يقدر يطلب منه. الفروع ما بتتحذفش — لو عندها طلبات، عطّلها بس.
+</p>
+
+<form method="post" class="mb-6 grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-2">
+  {{ csrf_field(request) }}
+  <input name="name" required class="rounded border px-3 py-2" placeholder="اسم الفرع (مثال: فرع المعادي)">
+  <input name="phone" class="rounded border px-3 py-2" placeholder="التليفون">
+  <input name="address" class="rounded border px-3 py-2 md:col-span-2" placeholder="العنوان">
+  <input name="opening_hours" class="rounded border px-3 py-2 md:col-span-2"
+         placeholder="ساعات العمل للعرض فقط (مثال: 10:00 — 02:00)">
+  <label class="flex items-center gap-2 md:col-span-2">
+    <input name="is_active" type="checkbox" value="true" checked> نشط
+  </label>
+  <button class="rounded bg-slate-900 px-4 py-2 font-bold text-white md:col-span-2">إضافة فرع</button>
+</form>
+
+<div class="grid gap-4 md:grid-cols-2">
+  {% for branch in branches %}
+    <form method="post" class="rounded bg-white p-4 shadow-sm">
+      {{ csrf_field(request) }}
+      <input type="hidden" name="id" value="{{ branch.id }}">
+      <input name="name" value="{{ branch.name }}" required class="mb-2 w-full rounded border px-3 py-2">
+      <input name="phone" value="{{ branch.phone or '' }}" class="mb-2 w-full rounded border px-3 py-2" placeholder="التليفون">
+      <input name="address" value="{{ branch.address or '' }}" class="mb-2 w-full rounded border px-3 py-2" placeholder="العنوان">
+      <input name="opening_hours" value="{{ branch.opening_hours or '' }}" class="mb-2 w-full rounded border px-3 py-2"
+             placeholder="ساعات العمل (للعرض فقط)">
+      <div class="mb-3 flex flex-wrap items-center gap-4">
+        <label><input name="is_active" type="checkbox" value="true" {% if branch.is_active %}checked{% endif %}> نشط</label>
+        {% if branch.is_default %}
+          <span class="rounded bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800">الفرع الافتراضي</span>
+        {% else %}
+          <button form="default-branch-{{ branch.id }}" class="rounded border border-emerald-700 px-2 py-1 text-xs font-bold text-emerald-700">
+            اجعله الافتراضي
+          </button>
+        {% endif %}
+      </div>
+      <button class="rounded bg-emerald-700 px-4 py-2 text-white">حفظ</button>
+    </form>
+    {% if not branch.is_default %}
+      <form id="default-branch-{{ branch.id }}" method="post" action="/admin/branches/{{ branch.id }}/default" class="hidden">
+        {{ csrf_field(request) }}
+      </form>
+    {% endif %}
+  {% else %}
+    <p class="text-sm text-slate-500">لم تتم إضافة فروع بعد.</p>
+  {% endfor %}
+</div>
+
+<section class="mt-8 rounded border border-amber-200 bg-amber-50 p-4">
+  <h2 class="mb-2 font-bold text-amber-900">ساعات استقبال الطلبات</h2>
+  <p class="mb-3 text-sm text-amber-800">
+    دي على مستوى المطعم كله، مش على مستوى الفرع، عشان كده متظبطةش من هنا.
+    تقدر تعدّلها من <a href="/admin/settings" class="font-bold underline">إعدادات المطعم</a>.
+  </p>
+  {% if settings.ordering_open_time and settings.ordering_close_time %}
+    <p class="text-sm font-bold text-amber-900">
+      الطلبات مفتوحة من {{ settings.ordering_open_time.strftime('%H:%M') }}
+      إلى {{ settings.ordering_close_time.strftime('%H:%M') }}
+      {%- if settings.ordering_open_time > settings.ordering_close_time %} (الراحة بتعدّي نص الليل){% endif %}.
+    </p>
+  {% else %}
+    <p class="text-sm font-bold text-amber-900">المطعم بيقبل الطلبات طول الوقت.</p>
+  {% endif %}
+</section>
+{% endblock %}

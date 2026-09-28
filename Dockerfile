@@ -18,4 +18,8 @@ RUN mkdir -p /app/app/uploads
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "python -m alembic upgrade head && python -m app.seed_admin && exec gunicorn -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 app.main:app"]
+# --forwarded-allow-ips: من غيرها، uvicorn بيشوف كل الطلبات جاية من
+# 127.0.0.1 وميقدرش يميّز عميل عن التاني في اللوجات ولا في rate limiting.
+# الافتراضي 127.0.0.1 ينفع لو مفيش proxy، أو لو في proxy على نفس الـhost.
+# غيّره من متغير البيئة لما يكون في proxy بعيد.
+CMD ["sh", "-c", "python -m alembic upgrade head && python -m app.seed_admin && exec gunicorn -k uvicorn.workers.UvicornWorker --forwarded-allow-ips=${FORWARDED_ALLOW_IPS:-127.0.0.1} --bind 0.0.0.0:8000 app.main:app"]

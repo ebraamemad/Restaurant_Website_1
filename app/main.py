@@ -1,35 +1,165 @@
 '''
 Application entry point with security middleware.
 '''
+import logging
 import os
+import re
 import time
+import uuid
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.database import engine, get_db
+from app.logging_config import configure_logging, request_id_var
 from app.routers import admin, admin_auth, api, public
 from app.security import CSRF_COOKIE_NAME, create_csrf_token, verify_csrf_token
+
+configure_logging()
+logger = logging.getLogger("app.main")
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+SW_FILE = BASE_DIR / "static" / "js" / "sw.js"
 
-app = FastAPI(title=settings.app_name)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Uvicorn بيقبل --forwarded-allow-ips. من غيره، أي reverse proxy قدام
+    # التطبيق بيخلي كل الطلبات تبان جاية من 127.0.0.1، والـrate limiting
+    # يبقى بلا معنى.
+    forwarded_allow_ips = os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1")
+    logger.info("uvicorn forwarded_allow_ips=%s", forwarded_allow_ips)
+    yield
+    engine.dispose()
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 
 @app.get("/health", include_in_schema=False)
 def health() -> JSONResponse:
+    """Liveness probe — قصير ومفيش dependencies.
+
+    متعمد إنه ما يتكلمش مع الداتابيز: لو الـcontainer بيستجيب، التطبيق
+    شغال. مشاكل الداتابيزReady بدل health.
+    """
     return JSONResponse({"status": "ok"})
+
+
+@app.get("/ready", include_in_schema=False)
+def ready(db: Session = Depends(get_db)) -> JSONResponse:
+    """Readiness probe — بيتأكد إن التطبيق يقدر يخدم فعليًا دلوقتي.
+
+    بيستخدم نفس الـpool، فلو الـDB مش راد بيرجّع 503 والـload balancer
+    يوجّه traffic لمكان تاني.
+    """
+    started = time.perf_counter()
+    try:
+        db.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        logger.exception("readiness_db_check_failed", extra={"event": "readiness_db_check_failed"})
+        return JSONResponse(
+            {"status": "unavailable", "detail": "database unreachable"},
+            status_code=503,
+        )
+    logger.info(
+        "readiness_ok",
+        extra={
+            "event": "readiness_ok",
+            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+        },
+    )
+    return JSONResponse({"status": "ready"})
+
+
+@app.get("/sw.js", include_in_schema=False)
+def service_worker() -> FileResponse:
+    """تقديم service worker من root range.
+
+    scope الـservice worker بيتحدد بالمسار اللي الملف اتserve منه. لو
+    اتserve من /static/js/sw.js، الـscope بيبقى /static/js/ — فمبتشتغلش على
+    صفحات الـHTML أصلاً، وده كان سبب الـoffline cache ما بيشتغلش.
+    """
+    return FileResponse(
+        SW_FILE,
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+    )
 
 
 def _is_admin_path(path: str) -> bool:
     return path == "/admin" or path.startswith("/admin/")
+
+
+def _is_api_path(path: str) -> bool:
+    return path == "/api" or path.startswith("/api/")
+
+
+# مسارات بيرجّعوا JSON/ملف مش HTML — متحوّلهاش لصفحة 404.
+_NON_HTML_PREFIXES = ("/static/", "/uploads/")
+_NON_HTML_PATHS = frozenset(
+    {
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+        "/docs/oauth2-redirect",
+        "/health",
+        "/ready",
+        "/sw.js",
+        "/manifest.json",
+    }
+)
+
+
+def _wants_html_404(path: str) -> bool:
+    if _is_api_path(path) or _is_admin_path(path):
+        return False
+    if path in _NON_HTML_PATHS:
+        return False
+    if path.startswith(_NON_HTML_PREFIXES):
+        return False
+    return True
+
+
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc: Exception) -> Response:
+    """صفحات العميل بتاخد صفحة 404HTML، والـAPI بتفضل JSON.
+
+    من غير ده، أي لينك قديم أو صنف اتشال من القائمة بيرجّع
+    `application/json` للعميل — يعني HTML خام في نص الصفحة.
+    """
+    if not _wants_html_404(request.url.path):
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    db = None
+    try:
+        db = next(get_db())
+        restaurant_settings = public.get_settings(db)
+    except Exception:
+        logger.exception("public_404_settings_lookup_failed")
+        restaurant_settings = None
+    finally:
+        if db is not None:
+            db.close()
+    if restaurant_settings is None:
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    return public.templates.TemplateResponse(
+        request=request,
+        name="public/404.html",
+        context={"request": request, "settings": restaurant_settings},
+        status_code=404,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -117,9 +247,73 @@ async def admin_csrf_cookie(request: Request, call_next):
             state_token,
             httponly=False,
             secure=settings.cookie_secure,
-            samesite="lax",
+            samesite=settings.cookie_samesite,
         )
     return response
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Headers حماية أساسية على كل response.
+
+    المدة بتاعت التنقل غير المهمة، والـAlpine local بدل CDN — مفيش طلبات
+    خارجية من متصفح العميل.
+    """
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy", "geolocation=(), camera=(), microphone=()"
+    )
+    if settings.is_production:
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
+
+
+@app.middleware("http")
+async def request_logging(request: Request, call_next):
+    """لوج لكل طلب: method + path + status + مدة التنفيذ + request id.
+
+    المسار بيتسجل من غير query string، لأن الـquery ممكن يحتوي كلام العميل
+    أو بيانات. مفيش PII ولا أسرار في اللوج.
+    """
+    inbound = request.headers.get("x-request-id", "")
+    request_id = re.sub(r"[^A-Za-z0-9_\-]", "", inbound)[:64] or uuid.uuid4().hex
+    token = request_id_var.set(request_id)
+    started = time.perf_counter()
+    try:
+        try:
+            response = await call_next(request)
+        except Exception:
+            logger.exception(
+                "request_failed",
+                extra={
+                    "event": "request_failed",
+                    "method": request.method,
+                    "path": request.url.path,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                },
+            )
+            raise
+        # لازم السطر ده جوه الـtry: لو رجعنا الـContextVar قبل ما نسجل،
+        # الـRequestIdFilter هيلاقي اللاج فاضي وrequest_id بيبقى "-".
+        logger.info(
+            "request",
+            extra={
+                "event": "request",
+                "method": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+            },
+        )
+        response.headers["X-Request-ID"] = request_id
+        return response
+    finally:
+        request_id_var.reset(token)
 
 
 app.include_router(public.router)

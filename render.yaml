@@ -7,7 +7,9 @@ services:
 
     buildCommand: pip install -r requirements.txt
 
-    startCommand: sh -c "python -m alembic upgrade head && python -m app.seed_admin && gunicorn -k uvicorn.workers.UvicornWorker app.main:app"
+    startCommand: sh -c "python -m alembic upgrade head && python -m app.seed_admin && gunicorn -k uvicorn.workers.UvicornWorker --forwarded-allow-ips='*' --bind 0.0.0.0:8000 app.main:app"
+
+    healthCheckPath: /ready
 
     envVars:
       - key: DATABASE_URL
@@ -27,3 +29,10 @@ services:
 
       - key: COOKIE_SECURE
         value: true
+
+      - key: LOG_FORMAT
+        # json عشان Render يجمّع السطور بشكل صحيح
+        value: json
+
+      - key: LOG_LEVEL
+        value: INFO

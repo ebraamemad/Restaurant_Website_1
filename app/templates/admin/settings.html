@@ -11,7 +11,21 @@
   <input name="phone_number" value="{{ settings.phone_number or '' }}" class="rounded border px-3 py-2" placeholder="رقم الهاتف">
   <input name="currency" value="{{ settings.currency }}" class="rounded border px-3 py-2" placeholder="العملة">
   <input name="address" value="{{ settings.address or '' }}" class="rounded border px-3 py-2 md:col-span-2" placeholder="العنوان">
-  <input name="working_hours" value="{{ settings.working_hours or '' }}" class="rounded border px-3 py-2 md:col-span-2" placeholder="مواعيد العمل">
+  <input name="working_hours" value="{{ settings.working_hours or '' }}" class="rounded border px-3 py-2 md:col-span-2" placeholder="مواعيد العمل (نص بيظهر للعميل)">
+
+  <h2 class="mt-2 text-lg font-bold md:col-span-2">ساعات استقبال الطلبات</h2>
+  <p class="text-sm text-slate-500 md:col-span-2">
+    على مستوى المطعم كله، مش على مستوى الفرع. سيبها فاضية لو المطعم بيقبل
+    الطلبات طول الوقت. لو وقت الإغلاق أبكر من وقت الفتح، النظام بيفهم إن
+    الراحة بتعدّي نص الليل (مثال: من 18:00 إلى 02:00). وقت الإغلاق نفسه مش
+    مقبول — سايبه فاضي بدل ما تقفل 24 ساعة.
+  </p>
+  <label class="text-sm text-slate-700">الطلب مفتوح من
+    <input name="ordering_open_time" type="time" value="{{ settings.ordering_open_time.strftime('%H:%M') if settings.ordering_open_time else '' }}" class="mt-1 w-full rounded border px-3 py-2">
+  </label>
+  <label class="text-sm text-slate-700">الطلب مفتوح لحد
+    <input name="ordering_close_time" type="time" value="{{ settings.ordering_close_time.strftime('%H:%M') if settings.ordering_close_time else '' }}" class="mt-1 w-full rounded border px-3 py-2">
+  </label>
   <textarea name="description" rows="2" class="rounded border px-3 py-2 md:col-span-2" placeholder="وصف المطعم — يظهر في أعلى الموقع وأسفله">{{ settings.description or "" }}</textarea>
   <input name="facebook_url" value="{{ settings.facebook_url or '' }}" class="rounded border px-3 py-2" placeholder="رابط فيسبوك (اختياري)">
   <input name="tiktok_url" value="{{ settings.tiktok_url or '' }}" class="rounded border px-3 py-2" placeholder="رابط تيك توك (اختياري)">

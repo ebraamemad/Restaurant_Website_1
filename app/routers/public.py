@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.models import (
+    Branch,
     Category,
     Coupon,
     Customer,
@@ -25,8 +26,26 @@ from app.models import (
     RestaurantSettings,
 )
 from app.ordering import compute_pricing, validate_scheduled_time
-from app.schemas import AddonOut, OrderCreate, OrderCreated, OrderStatus, ProductDetailOut
-from app.utils import build_search_variants, build_whatsapp_message, build_whatsapp_url, normalize_phone, parse_theme_colors
+from app.schemas import (
+    AddonOut,
+    BranchOut,
+    OrderChannel,
+    OrderCreate,
+    OrderCreated,
+    OrderStatus,
+    OrderingStatusOut,
+    ProductDetailOut,
+)
+from app.utils import (
+    PHONE_INVALID_MESSAGE,
+    build_search_variants,
+    build_whatsapp_message,
+    build_whatsapp_url,
+    is_within_ordering_hours,
+    normalize_phone,
+    ordering_hours_message,
+    parse_theme_colors,
+)
 
 router = APIRouter()
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
@@ -42,6 +61,101 @@ def get_settings(db: Session) -> RestaurantSettings:
         db.commit()
         db.refresh(settings)
     return settings
+
+
+def default_branch(db: Session) -> Optional[Branch]:
+    """الفرع الافتراضي — اللي بيتستخدم لو العميل مابعتش فرع."""
+    return db.scalar(
+        select(Branch).where(Branch.is_default.is_(True)).order_by(Branch.id).limit(1)
+    )
+
+
+def resolve_branch(db: Session, branch_id: Optional[int]) -> Branch:
+    """ترجّع فرع صالح للطلب ده، أو ترفع 400.
+
+    - عميل بعت فرع: لازم يكون موجود **و** مفعّل. الفرع المعطّل مرفوض
+      عشان ما ينفعش حد يطلب من فرع مقفول بالغلط.
+    - عميل مابعتش فرع (عميل قديم): بنستخدم الفرع الافتراضي. العمود
+      `orders.branch_id` NOT NULL في الداتابيز، فمفيش طلب بيتحفظ من غير
+      فرع مهما كان العميل قديم.
+    """
+    if branch_id is not None:
+        branch = db.get(Branch, branch_id)
+        if branch is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "الفرع المختار مش موجود")
+        if not branch.is_active:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "الفرع المختار مش متاح للطلبات حاليًا"
+            )
+        return branch
+    branch = default_branch(db)
+    if branch is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "مفيش فرع متاح للطلبات حاليًا")
+    return branch
+
+
+@router.get("/api/branches", response_model=List[BranchOut])
+def list_branches(db: Session = Depends(get_db)) -> List[BranchOut]:
+    """الفروع المتاحة للعميل.
+
+    الفروع غير المفعّلة مش بتظهر خالص — العميل مش المفروض يشوف فرع
+    مقفول أصلاً، وكمان `resolve_order` هيرفضه لو حد بعت الـid يدوي.
+    """
+    branches = db.scalars(
+        select(Branch)
+        .where(Branch.is_active.is_(True))
+        .order_by(Branch.is_default.desc(), Branch.name)
+    ).all()
+    return [BranchOut.model_validate(branch) for branch in branches]
+
+
+@router.get("/order/success", response_class=HTMLResponse)
+def order_success(
+    request: Request,
+    order_id: int,
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """صفحة تأكيد الطلب في الموقع (طلب `system`).
+
+    بتعرض رقم الطلب بس — مفيش أي بيانات عميل أو سعر بيتسرّب في الـURL.
+    """
+    order = db.get(Order, order_id)
+    if order is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "الطلب مش موجود")
+    return templates.TemplateResponse(
+        "public/order_success.html",
+        {
+            "request": request,
+            "order_id": order.id,
+            "settings": get_settings(db),
+        },
+    )
+
+
+@router.get("/api/ordering-status", response_model=OrderingStatusOut)
+def ordering_status(db: Session = Depends(get_db)) -> OrderingStatusOut:
+    """هل استقبال الطلبات مفتوح دلوقتي؟
+
+    الساعات دي globals على مستوى المطعم كله مش على مستوى الفرع. العميل
+    يقدر يتفرج على الموقع وهو مقفول، بس مش يبعت طلب.
+    """
+    restaurant_settings = get_settings(db)
+    open_time = restaurant_settings.ordering_open_time
+    close_time = restaurant_settings.ordering_close_time
+    is_open = is_within_ordering_hours(open_time, close_time)
+    overnight = bool(
+        open_time is not None
+        and close_time is not None
+        and open_time != close_time
+        and open_time > close_time
+    )
+    return OrderingStatusOut(
+        is_open=is_open,
+        open_time=open_time.strftime("%H:%M") if open_time else None,
+        close_time=close_time.strftime("%H:%M") if close_time else None,
+        overnight=overnight,
+        message=ordering_hours_message(open_time, close_time),
+    )
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -176,6 +290,27 @@ def product_detail(request: Request, product_slug: str, db: Session = Depends(ge
 
 @router.post("/orders", response_model=OrderCreated)
 def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCreated:
+    restaurant_settings = get_settings(db)
+
+    # 0) ساعات استقبال الطلبات —.globale على مستوى المطعم كله. العميل
+    #    يقدر يتفرج على الموقع وهو مقفول، بس مش يقدر يبعت طلب.
+    if not is_within_ordering_hours(
+        restaurant_settings.ordering_open_time,
+        restaurant_settings.ordering_close_time,
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            ordering_hours_message(
+                restaurant_settings.ordering_open_time,
+                restaurant_settings.ordering_close_time,
+            )
+            or "الطلب عبر الموقع مغلق دلوقتي.",
+        )
+
+    # 0.b) الفرع. العميل بيبعت فرع، ولو مبعتش (عميل قديم) بنرجعله
+    #      الفرع الافتراضي. الفرع المعطّل أو المجهول مرفوض.
+    branch = resolve_branch(db, payload.branch_id)
+
     # 1) موعد الطلب المجدول (استلام/توصيل) لازم يكون في المستقبل.
     scheduled_time = validate_scheduled_time(payload.pickup_time)
 
@@ -207,6 +342,8 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
         discount_amount=pricing.discount_amount,
         total=pricing.total,
         whatsapp_message="",
+        branch_id=branch.id,
+        channel=payload.channel.value,
         delivery_option_id=delivery_option.id if delivery_option else None,
         delivery_zone_id=pricing.delivery_zone.id if pricing.delivery_zone else None,
         coupon_id=pricing.coupon.id if pricing.coupon else None,
@@ -271,9 +408,13 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
 
     # 6) منع race condition: التحقق من كوبون first-order-only مع قفل العهدة.
     if pricing.coupon is not None and pricing.coupon.first_order_only:
-        # Lock the Customer row to prevent concurrent first-order coupon usage
+        # العميل لازم يكون اتسجل في الخطوة 5. التليفون بيتحقق في الـschema،
+        # فالمفروض عمره ما يوصل هنا فاضي — لكن الحماية بتمنع أي 500 مستقبلي.
+        if customer is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, PHONE_INVALID_MESSAGE)
+        # قفل صف العميل عشان كوبون first-order-only ما يتسابّش مرتين
         db.scalar(select(Customer).where(Customer.id == customer.id).with_for_update())
-        # Lock the Coupon row to prevent concurrent first-order-only coupon usage
+        # قفل صف الكوبون نفس السبب
         db.scalar(select(Coupon).where(Coupon.id == pricing.coupon.id).with_for_update())
         from sqlalchemy import func as sa_func
         db_digits = sa_func.regexp_replace(
@@ -301,7 +442,9 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
     db.add(order)
     db.flush()
 
-    restaurant_settings = get_settings(db)
+    # الرسالة بتتبني في الحالتين عشان تفضل لقطة مرجعية في السجل بتاع
+    # الطلب، زي ما كانت في V1 بالظبط. الفرق الوحيد إن طلب `system` مش
+    # بيرجّع رابط واتساب للعميل.
     message = build_whatsapp_message(
         restaurant_settings,
         order.id,
@@ -322,6 +465,10 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
     )
     order.whatsapp_message = message
 
+    # 9) التحويل لواتساب بيحصل **بعد** ما الطلب اتحفظ في الداتابيز. واتساب
+    #    قناة تواصل مش مصدر حقيقة، فالطلب لازم يكون موجود قبل أي رسالة.
+    is_whatsapp = payload.channel == OrderChannel.whatsapp
+
     db.commit()
     db.refresh(order)
     return OrderCreated(
@@ -332,5 +479,11 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
         delivery_fee=order.delivery_fee,
         total=order.total,
         currency=restaurant_settings.currency,
-        whatsapp_url=build_whatsapp_url(restaurant_settings.whatsapp_number, message),
+        branch_id=order.branch_id,
+        channel=order.channel,
+        whatsapp_url=(
+            build_whatsapp_url(restaurant_settings.whatsapp_number, message)
+            if is_whatsapp
+            else None
+        ),
     )

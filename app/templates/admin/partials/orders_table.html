@@ -2,7 +2,7 @@
   <table class="w-full min-w-[760px] text-sm">
     <thead class="bg-slate-100 text-right">
       <tr>
-        <th class="p-3">#</th><th class="p-3">العميل</th><th class="p-3">الهاتف</th><th class="p-3">الإجمالي</th><th class="p-3">الحالة</th><th class="p-3">التاريخ</th><th class="p-3">المنتجات</th>
+        <th class="p-3">#</th><th class="p-3">العميل</th><th class="p-3">الهاتف</th><th class="p-3">الفرع</th><th class="p-3">الإجمالي</th><th class="p-3">الحالة</th><th class="p-3">التاريخ</th><th class="p-3">المنتجات</th>
       </tr>
     </thead>
     <tbody>
@@ -16,6 +16,12 @@
             {% if order.coupon %}<div class="text-xs text-emerald-700">كوبون: {{ order.coupon.code }}</div>{% endif %}
           </td>
           <td class="p-3">{{ order.customer_phone }}</td>
+          <td class="p-3">
+            {{ order.branch.name if order.branch else "—" }}
+            <div class="text-[11px] text-slate-400">
+              {% if order.channel == "whatsapp" %}عبر واتساب{% elif order.channel == "system" %}من الموقع{% else %}{{ order.channel }}{% endif %}
+            </div>
+          </td>
           <td class="p-3">
             <div class="font-bold">{{ order.total }}</div>
             <div class="text-[11px] text-slate-400">فرعي {{ order.subtotal }}{% if order.discount_amount %} - خصم {{ order.discount_amount }}{% endif %}{% if order.delivery_fee %} + توصيل {{ order.delivery_fee }}{% endif %}</div>
@@ -53,7 +59,7 @@
           </td>
         </tr>
       {% else %}
-        <tr><td class="p-4 text-center text-slate-500" colspan="7">لا توجد طلبات</td></tr>
+        <tr><td class="p-4 text-center text-slate-500" colspan="8">لا توجد طلبات</td></tr>
       {% endfor %}
     </tbody>
   </table>

@@ -59,7 +59,13 @@ function storeCart() {
     qtyMap: {}, // كمية مؤقتة لكل كارت منتج على الصفحة الرئيسية
     customer: { name: "", phone: "", address: "", notes: "" },
 
-    // ===== Checkout: طريقة الاستلام + الوقت + الكوبون + معاينة الحساب من الـBackend =====
+    // ===== Checkout: الفرع + طريقة الاستلام + الوقت + الكوبون + معاينة الحساب =====
+    // `branches` من `/api/branches` — فروع مفعّلة بس. `selectedBranchId`
+    // لو الـAPI رجّع فروع، بنختار أول واحد (الـdefault بييجي الأول).
+    // `orderChannel` بيحدد هل الطلب هيتحوّل لواتساب ولا يفضل جوه الموقع.
+    branches: [],
+    selectedBranchId: null,
+    orderChannel: "whatsapp", // "whatsapp" | "system"
     deliveryOptions: [],
     deliveryZones: [],
     selectedDeliveryId: null,
@@ -84,9 +90,10 @@ function storeCart() {
 
     async loadCheckout() {
       try {
-        const [optionsResp, zonesResp] = await Promise.all([
+        const [optionsResp, zonesResp, branchesResp] = await Promise.all([
           fetch("/api/delivery-options"),
           fetch("/api/delivery-zones"),
+          fetch("/api/branches"),
         ]);
         if (optionsResp.ok) {
           this.deliveryOptions = await optionsResp.json();
@@ -95,8 +102,19 @@ function storeCart() {
           }
         }
         if (zonesResp.ok) this.deliveryZones = await zonesResp.json();
+        if (branchesResp.ok) {
+          this.branches = await branchesResp.json();
+          if (this.branches.length && this.selectedBranchId === null) {
+            this.selectedBranchId = this.branches[0].id;
+          }
+        }
       } catch {}
       this.refreshPreview();
+    },
+    selectedBranch() {
+      return (
+        this.branches.find((b) => b.id === this.selectedBranchId) || null
+      );
     },
     selectedDeliveryOption() {
       return (
@@ -184,6 +202,31 @@ function storeCart() {
 
     formatPrice(value) {
       return Number(value || 0).toFixed(2);
+    },
+
+    // استجابة 422 من FastAPI بترجع detail كقائمة أخطاء، مش نص.
+    // بناخد أول رسالة human-readable عشان نعرضها للعميل.
+    extractErrorMessage(payload, fallback) {
+      const detail = payload && payload.detail;
+      if (typeof detail === "string" && detail) return detail;
+      if (Array.isArray(detail)) {
+        const first = detail.find((d) => d && typeof d.msg === "string" && d.msg);
+        if (first) return first.msg;
+      }
+      return fallback;
+    },
+
+    // تحقق سريع من رقم الموبايل المصري قبل ما نبعته للسيرفر.
+    // السيرفر بيتحقق تاني وبيرفض الغلط برضه — ده مجرد UX.
+    phoneLooksValid() {
+      const digits = this.customer.phone.replace(/\D/g, "").replace(/^00/, "");
+      const national = digits.startsWith("20") && digits.length > 10
+        ? digits.slice(2)
+        : digits;
+      const local = national.startsWith("0") && national.length === 11
+        ? national.slice(1)
+        : national;
+      return /^1[0125]\d{8}$/.test(local);
     },
 
     // سعر الوحدة = سعر المنتج + الإضافات + الخيارات (للعرض فقط — الـBackend بيعيد التحقق)
@@ -281,9 +324,24 @@ function storeCart() {
       if (!this.items.length) return;
       this.error = "";
 
+      // الاسم لازم يكون فيه حرفين على الأقل (نفس شرط السيرفر)
+      if (this.customer.name.trim().length < 2) {
+        this.error = "من فضلك اكتب اسمك.";
+        return;
+      }
+      // رقم موبايل مصري صحيح
+      if (!this.phoneLooksValid()) {
+        this.error = "رقم الهاتف غير صحيح — من فضلك اكتب رقم موبايل مصري صحيح (مثال: 01012345678)";
+        return;
+      }
       // العنوان مطلوب للتوصيل فقط
       if (!this.isPickup() && this.customer.address.trim().length < 5) {
         this.error = "من فضلك أدخل عنوان التوصيل.";
+        return;
+      }
+      // لازم يبقى فيه فرع مفعّل واحد على الأقل
+      if (this.branches.length && !this.selectedBranchId) {
+        this.error = "من فضلك اختر الفرع.";
         return;
       }
       // الوقت المحدد لازم يكون في المستقبل
@@ -316,14 +374,17 @@ function storeCart() {
             coupon_code: this.couponCode.trim() || null,
             pickup_time: pickupTime,
             payment_method: this.selectedPaymentMethod,
+            // الفرع والقناة — السيرفر بيتحقق منهم تاني وبيربط
+            // الطلب بفرع مفعّل قبل ما يحفظه.
+            branch_id: this.selectedBranchId,
+            channel: this.orderChannel,
             items: this.mappedItems(),
           }),
         });
         if (!resp.ok) {
           let msg = "راجع بيانات الطلب.";
           try {
-            const detail = (await resp.json()).detail;
-            if (detail) msg = detail;
+            msg = this.extractErrorMessage(await resp.json(), msg);
           } catch {}
           this.error = msg;
           return;
@@ -332,7 +393,13 @@ function storeCart() {
         Cart.clear();
         this.items = [];
         this.preview = { subtotal: 0, discount_amount: 0, delivery_fee: 0, total: 0 };
-        window.location.href = data.whatsapp_url;
+        if (this.orderChannel === "whatsapp" && data.whatsapp_url) {
+          window.location.href = data.whatsapp_url;
+        } else {
+          // طلب `system`: الطلب اتحفظ وقاعد في لوحة التحكم. من غير هندلة
+          // لواتساب، بنوديه على صفحة تأكيد عادية.
+          window.location.href = "/order/success?order_id=" + data.order_id;
+        }
       } catch {
         this.error = "تعذّر إرسال الطلب.";
       } finally {

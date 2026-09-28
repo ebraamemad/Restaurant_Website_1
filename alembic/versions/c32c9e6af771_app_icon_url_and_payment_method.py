@@ -29,3 +29,11 @@ def downgrade() -> None:
     op.drop_column('products', 'is_offer')
     op.drop_column('products', 'is_featured')
     op.drop_column('restaurant_settings', 'app_icon_url')
+    # Restore categories.is_featured, which the upgrade above dropped. The
+    # NOT NULL add needs a server default for existing rows, which we then
+    # drop so the ORM default applies on insert.
+    op.add_column(
+        'categories',
+        sa.Column('is_featured', sa.Boolean(), nullable=False, server_default=sa.false()),
+    )
+    op.alter_column('categories', 'is_featured', server_default=None)

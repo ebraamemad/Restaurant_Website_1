@@ -1,10 +1,24 @@
 from __future__ import annotations
 
 from datetime import datetime
+from datetime import time as dt_time
 from decimal import Decimal
 from typing import List, Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    Time,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -20,6 +34,75 @@ class Admin(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AdminLoginAttempt(Base):
+    """محاولات دخول فاشلة إلى لوحة الإدارة — أساس حماية الـbrute-force.
+
+    بنخزن hash من الـIP ومن (IP + username) مش النص الخام، لسببين:
+    - الجدول ما يكشفش مين حاول يدخل لو اتقرا أو اتسرق.
+    - مفيش أي بيانات شخصية مخزنة، فقط قيم hash مشارة بالمفتاح السري.
+    """
+
+    __tablename__ = "admin_login_attempts"
+    # الفحص بيصير مرتين في كل طلب: مرة على key_hash ومرة على ip_hash، وفي
+    # الحالتين بيتفلتر على attempted_at. الـcomposite indexes دي بتخلّي
+    # العدّاد index-only من غير ما يمسّ الجدول. لو فضلنا على single-column
+    # بس، Postgres هيعمل bitmap scan لكل عدّاد.
+    __table_args__ = (
+        Index("ix_admin_login_attempts_key_time", "key_hash", "attempted_at"),
+        Index("ix_admin_login_attempts_ip_time", "ip_hash", "attempted_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ip_hash: Mapped[str] = mapped_column(String(64), index=True)
+    key_hash: Mapped[str] = mapped_column(String(64), index=True)
+    attempted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
+class Branch(Base):
+    """فرع من فروع المطعم.
+
+    المطعم بيكون عنده 1–3 فروع في الغالب. الموديل ده صغير على قد اللي
+    محتاجينه دلوقتي: الاسم والعنوان والتليفون وساعات العمل وحالة
+    التفعيل.
+
+    قرار مقصود: `opening_hours` هنا **معلومة فقط**. ساعات استقبال الطلبات
+    Online globale على مستوى المطعم كله ومش على مستوى الفرع، وده
+    متظبط في `RestaurantSettings.ordering_open_time` / `ordering_close_time`.
+    ساعات الفرع بتظهر للعميل بس (مثال: "الفتح"),
+    ومفيش أي منطق في الـbusiness بيحكم على الوقت بتاعها.
+    """
+
+    __tablename__ = "branches"
+    # "فرع افتراضي واحد بس" كضمان في الداتابيز مش مجرد اتفاق في الكود:
+    # الـpartial unique index ده بيسمح بأي عدد من الفروع العادية، وبيسمح
+    # بواحد بس يكون افتراضي. من غيره، طلبين متزامنين في اللوحة ممكن
+    # يعملوا اتنين default.
+    __table_args__ = (
+        Index(
+            "ix_branches_single_default",
+            "is_default",
+            unique=True,
+            postgresql_where=text("is_default IS TRUE"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    address: Mapped[Optional[str]] = mapped_column(String(300))
+    phone: Mapped[Optional[str]] = mapped_column(String(30))
+    opening_hours: Mapped[Optional[str]] = mapped_column(String(250))  # معلومة فقط
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true", index=True
+    )
+    # بتقبل طلب واحد بس، وبيتستخدم كـfallback للطلبات اللي مابتبعش فرع.
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    orders: Mapped[List["Order"]] = relationship(back_populates="branch")
 
 
 class Category(Base):
@@ -96,6 +179,17 @@ class Order(Base):
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))  # خصم الكوبون المحفوظ وقت الطلب
     total: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     whatsapp_message: Mapped[str] = mapped_column(Text)
+    # كل طلب لازم يكون مربوط بفرع. RESTRICT مقصود: ممنوع نمسح فرع لسه
+    # فيه طلبات، عشان تاريخ الطلبات ما يضيعش.
+    branch_id: Mapped[int] = mapped_column(
+        ForeignKey("branches.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    # القناة: الطلب بيتعمل من الموقع بس (system) ولا من الموقع مع تحويل
+    # لواتساب (whatsapp). دي بتوصف إزاي الطلب بدأ بس — الطلب نفسه ونوعه
+    # واحد في الحالتين، ومفيش تكرار في منطق إنشاء الطلب.
+    channel: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="whatsapp", server_default="whatsapp", index=True
+    )
     delivery_option_id: Mapped[Optional[int]] = mapped_column(ForeignKey("delivery_options.id", ondelete="SET NULL"))
     delivery_zone_id: Mapped[Optional[int]] = mapped_column(ForeignKey("delivery_zones.id", ondelete="SET NULL"), index=True)
     coupon_id: Mapped[Optional[int]] = mapped_column(ForeignKey("coupons.id", ondelete="SET NULL"), index=True)
@@ -106,10 +200,19 @@ class Order(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     items: Mapped[List["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
+    branch: Mapped["Branch"] = relationship(back_populates="orders")
     delivery_option: Mapped[Optional["DeliveryOption"]] = relationship(back_populates="orders")
     delivery_zone: Mapped[Optional["DeliveryZone"]] = relationship(back_populates="orders")
     coupon: Mapped[Optional["Coupon"]] = relationship(back_populates="orders")
     customer: Mapped[Optional["Customer"]] = relationship(back_populates="orders")
+
+    # القيد مكتوب في الـmodel كمان مش في الـmigration بس — عشان أي حد
+    # يقرأ الموديل يشوف القيم المسموحة من غير ما يفتح ملف الـmigration.
+    __table_args__ = (
+        CheckConstraint(
+            "channel IN ('system', 'whatsapp')", name="ck_orders_channel"
+        ),
+    )
 
 
 class OrderItem(Base):
@@ -171,7 +274,13 @@ class RestaurantSettings(Base):
     logo_url: Mapped[Optional[str]] = mapped_column(String(500))
     banner_url: Mapped[Optional[str]] = mapped_column(String(500))
     app_icon_url: Mapped[Optional[str]] = mapped_column(String(500))
-    working_hours: Mapped[Optional[str]] = mapped_column(String(250))
+    working_hours: Mapped[Optional[str]] = mapped_column(String(250))  # نص حر للعرض فقط
+    # ساعات استقبال الطلبات Online —.globale على مستوى المطعم كله، مش
+    # على مستوى الفرع. لو الاتنين NULL (الوضع الافتراضي) الطلب مفتوح
+    # طول الوقت زي V1 بالظبط. لو اتحددوا، الراحة بتغطي نص الليل عادي
+    # (مثلاً 18:00 → 02:00).
+    ordering_open_time: Mapped[Optional[dt_time]] = mapped_column(Time)
+    ordering_close_time: Mapped[Optional[dt_time]] = mapped_column(Time)
     currency: Mapped[str] = mapped_column(String(10), default="EGP")
     facebook_url: Mapped[Optional[str]] = mapped_column(String(500))
     tiktok_url: Mapped[Optional[str]] = mapped_column(String(500))

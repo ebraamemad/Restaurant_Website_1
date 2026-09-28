@@ -1,0 +1,11 @@
+# Development and test dependencies.
+#
+# The production image only installs requirements.txt, so nothing in here is
+# needed to run the app — but pytest and httpx are required to run the suite.
+# fastapi.testclient needs httpx, and the app itself is installed in editable
+# mode so `import app` resolves.
+
+-r requirements.txt
+
+pytest>=8.0
+httpx>=0.27

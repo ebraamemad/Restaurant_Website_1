@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, time as dt_time, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -210,6 +210,9 @@ def normalize_phone(phone_number: str) -> str:
     Egyptian numbers (local 01x or international +20/0020) both normalize to the
     same 10-digit national format without leading zero (e.g., '1012345678').
     This ensures consistent customer deduplication regardless of input format.
+
+    ملاحظة: بترجع نص فاضي لو المدخل مالوش أرقام — المتصلين لازم يتأكدوا
+    من صحة الرقم قبل ما يستخدموا النتيجة (راجع validate_customer_phone).
     """
     digits = re.sub(r"\D", "", phone_number or "")
     if digits.startswith("00"):
@@ -219,3 +222,120 @@ def normalize_phone(phone_number: str) -> str:
     if digits.startswith("0") and len(digits) == 11:
         digits = digits[1:]
     return digits
+
+
+# بادئات الموبايل المصري بعد التوحيد (10 أرقام): 010 / 011 / 012 / 015
+EGYPT_MOBILE_PREFIXES = frozenset({"10", "11", "12", "15"})
+
+PHONE_INVALID_MESSAGE = "رقم الهاتف غير صحيح — من فضلك اكتب رقم موبايل مصري صحيح (مثال: 01012345678)"
+
+# أطول نص مقبول قبل التنظيف: أطول صيغة مدعومة هي 0020 + 10 أرقام = 14 رقم،
+# والباقي مسافات أو رموز. الحد ده بيمنه Denial of Service على الـregex.
+PHONE_MAX_INPUT_LENGTH = 30
+
+
+def is_valid_egypt_phone(normalized: str) -> bool:
+    """هل الرقم بعد التوحيد رقم موبايل مصري صالح؟ (10 أرقام، بادئة معروفة)"""
+    return len(normalized) == 10 and normalized.isdigit() and normalized[:2] in EGYPT_MOBILE_PREFIXES
+
+
+def to_display_phone(normalized: str) -> str:
+    """الشكل اللي بيتعرض للعميل والإدارة: 0 + الرقم الموحد (مثال: 01012345678).
+
+    مهم: استعلامات الـfirst-order-only في SQL بتشيل الصفر الأول من
+    orders.customer_phone، فتخزين الشكل ده بيفضل متوافق مع كل الصفوف القديمة.
+    """
+    return f"0{normalized}" if len(normalized) == 10 else normalized
+
+
+def validate_customer_phone(raw: str) -> str:
+    """تتحقق من رقم الموبايل المصري وترجعه في الشكل الموحد للعرض.
+
+    بتقبل: 01012345678 / +201012345678 / 00201012345678 / 201012345678.
+
+    بترمي ValueError برسالة عربية واضحة — وFastAPI بيحوّلها لـ422 بدل ما
+    المدخل الغلط يوصل لوجيك الأعمال ويسبب 500.
+
+    الأرقام اللي مش موبايل مصري (أرضي، أو أرقام ناقصة/غلط) بترفض هنا عمدًا،
+    لأن رقم العميل لازم يقدر يستقبل رسالة واتساب.
+    """
+    if raw is None:
+        raise ValueError(PHONE_INVALID_MESSAGE)
+    if len(raw) > PHONE_MAX_INPUT_LENGTH:
+        raise ValueError(PHONE_INVALID_MESSAGE)
+    normalized = normalize_phone(raw)
+    if not is_valid_egypt_phone(normalized):
+        raise ValueError(PHONE_INVALID_MESSAGE)
+    return to_display_phone(normalized)
+
+
+def mask_phone(phone_number: Optional[str]) -> str:
+    """تمويه الرقم قبل أي تسجيل في اللوجات — ما بنسجلش رقم عميل كامل."""
+    digits = re.sub(r"\D", "", phone_number or "")
+    if len(digits) < 6:
+        return "***"
+    return f"{'*' * (len(digits) - 4)}{digits[-4:]}"
+
+
+# ---------------------------------------------------------------------------
+# ساعات استقبال الطلبات (globale على مستوى المطعم كله)
+# ---------------------------------------------------------------------------
+
+
+def is_within_ordering_hours(
+    open_time: Optional[dt_time],
+    close_time: Optional[dt_time],
+    now: Optional[dt_time] = None,
+) -> bool:
+    """هل المطعم مفتوح لاستقبال الطلبات Online دلوقتي؟
+
+    لو الوقتين مش متعددين (إحداهم NULL) بنعتبر المطعم مفتوح طول الوقت —
+    ده الوضع الافتراضي اللي V1 بيشتغل بيه، ومفيش تغيير في السلوك
+    الموجود.
+
+    **الراحة اللي بتلفّ نص الليل:** لو وقت الإغلاق أبكر من وقت الفتح
+    (مثلاً 18:00 → 02:00) بنعتبر الفترة دي ممتدة لحد اليوم اللي بعده.
+    الحالة العادية (فتح وإغلاق في نفس اليوم) بتقارن الوقت بس.
+
+    `open_time == close_time` معناها 24 ساعة مفتوح، مش "مقفول دايماً".
+    """
+    if open_time is None or close_time is None:
+        return True
+    current = now if now is not None else datetime.now(timezone.utc).time()
+    if open_time == close_time:
+        return True
+    if open_time < close_time:
+        return open_time <= current < close_time
+    # راحة بتعدّي نص الليل، زي 18:00 → 02:00
+    return current >= open_time or current < close_time
+
+
+def ordering_hours_message(
+    open_time: Optional[dt_time], close_time: Optional[dt_time]
+) -> str:
+    """رسالة عربية للعميل لما يكون الطلب مقفول."""
+    if open_time is None or close_time is None:
+        return ""
+    return (
+        f"الطلب عبر الموقع متاح من {open_time.strftime('%H:%M')} "
+        f"إلى {close_time.strftime('%H:%M')} يوميًا."
+    )
+
+
+def parse_ordering_time(value: Optional[str], label: str) -> Optional[dt_time]:
+    """حوّل قيمة `<input type="time">` لـ`time`.
+
+    المتصفح بيبعت `HH:MM` أو نص فاضي. أي نص تاني — لو حد بيبعت request
+    متعمد — بيرفع `ValueError` يتحوّل لـ400 في الراوتر، بدل ما يوقع في
+    استثناء غامض جوّه SQLAlchemy وقت الحفظ.
+    """
+    if value is None or not str(value).strip():
+        return None
+    raw = str(value).strip()
+    try:
+        parsed = dt_time.fromisoformat(raw)
+    except ValueError as exc:
+        raise ValueError(f"وقت {label} لازم يكون بصيغة HH:MM") from exc
+    if parsed.second or parsed.microsecond:
+        raise ValueError(f"وقت {label} لازم يكون HH:MM بدون ثواني")
+    return parsed.replace(second=0, microsecond=0)

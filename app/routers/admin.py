@@ -20,6 +20,7 @@ from app.deps import get_current_admin, verify_admin_csrf
 from app.models import (
     Admin,
     Addon,
+    Branch,
     Category,
     Coupon,
     Customer,
@@ -42,6 +43,7 @@ from app.utils import (
     make_slug,
     normalize_hex_color,
     normalize_phone,
+    parse_ordering_time,
     parse_theme_colors,
     save_image,
 )
@@ -298,6 +300,7 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin: Admin = De
             selectinload(Order.items).selectinload(OrderItem.options),
             selectinload(Order.delivery_option),
             selectinload(Order.coupon),
+            selectinload(Order.branch),
         )
         .order_by(Order.created_at.desc())
         .limit(8)
@@ -694,6 +697,7 @@ def orders_page(
             selectinload(Order.items).selectinload(OrderItem.options),
             selectinload(Order.delivery_option),
             selectinload(Order.coupon),
+            selectinload(Order.branch),
         )
         .offset(offset)
         .limit(ORDERS_PAGE_SIZE)
@@ -944,6 +948,7 @@ def customer_detail(request: Request, customer_id: int, db: Session = Depends(ge
             selectinload(Order.items).selectinload(OrderItem.options),
             selectinload(Order.delivery_option),
             selectinload(Order.coupon),
+            selectinload(Order.branch),
         )
         .order_by(Order.created_at.desc())
     ).all()
@@ -1013,6 +1018,76 @@ def delete_delivery_option(option_id: int, db: Session = Depends(get_db)) -> Red
     return redirect("/admin/delivery-options")
 
 
+@router.get("/branches", response_class=HTMLResponse)
+def branches_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    branches = db.scalars(
+        select(Branch).order_by(Branch.is_default.desc(), Branch.name)
+    ).all()
+    return templates.TemplateResponse(
+        "admin/branches.html",
+        {
+            "request": request,
+            "branches": branches,
+            "settings": get_or_create_settings(db),
+        },
+    )
+
+
+@router.post("/branches")
+def save_branch(
+    id: Optional[int] = Form(default=None),
+    name: str = Form(...),
+    address: Optional[str] = Form(default=None),
+    phone: Optional[str] = Form(default=None),
+    opening_hours: Optional[str] = Form(default=None),
+    is_active: bool = Form(default=True),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    cleaned_name = name.strip()
+    if len(cleaned_name) < 2:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "اسم الفرع قصير أوي")
+
+    branch = db.get(Branch, id) if id else None
+    if id and branch is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "الفرع غير موجود")
+    if branch is None:
+        branch = Branch(is_default=False)
+    branch.name = cleaned_name
+    branch.address = address.strip() or None if address else None
+    branch.phone = phone.strip() or None if phone else None
+    branch.opening_hours = opening_hours.strip() or None if opening_hours else None
+    branch.is_active = is_active
+    db.add(branch)
+    db.commit()
+    return redirect("/admin/branches")
+
+
+@router.post("/branches/{branch_id}/default")
+def set_default_branch(
+    branch_id: int, db: Session = Depends(get_db)
+) -> RedirectResponse:
+    """عين فرع افتراضي واحد بس.
+
+    الفهرس الجزئي `ix_branches_single_default` في الداتابيز بيمنع اتنين
+    مع بعض على مستوى الـdatabase، فمش محتاجين منطق تاني هنا.
+    """
+    branch = db.get(Branch, branch_id)
+    if branch is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "الفرع غير موجود")
+    if not branch.is_active:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "مينفعش تخلي فرع معطّل هو الافتراضي — شغّله الأول",
+        )
+    for other in db.scalars(select(Branch).where(Branch.is_default.is_(True))).all():
+        other.is_default = False
+        db.add(other)
+    branch.is_default = True
+    db.add(branch)
+    db.commit()
+    return redirect("/admin/branches")
+
+
 @router.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     return templates.TemplateResponse("admin/settings.html", {"request": request, "settings": get_or_create_settings(db)})
@@ -1025,6 +1100,8 @@ async def save_settings(
     phone_number: Optional[str] = Form(default=None),
     address: Optional[str] = Form(default=None),
     working_hours: Optional[str] = Form(default=None),
+    ordering_open_time: Optional[str] = Form(default=None),
+    ordering_close_time: Optional[str] = Form(default=None),
     currency: str = Form(default="EGP"),
     facebook_url: Optional[str] = Form(default=None),
     tiktok_url: Optional[str] = Form(default=None),
@@ -1052,12 +1129,27 @@ async def save_settings(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Invalid {key} color — expected hex like #059669")
         theme[key] = normalized
 
+    # ساعات استقبال الطلبات — اختيارية. لو واحدة بس اتبعتت من غير التانية
+    # بنرفض عشان ما يحصلش طلب ميتقفلش أو مفتوحش على نصه.
+    try:
+        open_time = parse_ordering_time(ordering_open_time, "الفتح")
+        close_time = parse_ordering_time(ordering_close_time, "الإغلاق")
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    if (open_time is None) != (close_time is None):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "لازم تحدد وقت الفتح ووقت الإغلاق مع بعض، أو تسيب الاتنين فاضيين",
+        )
+
     settings = get_or_create_settings(db)
     settings.restaurant_name = restaurant_name
     settings.whatsapp_number = whatsapp_number
     settings.phone_number = phone_number
     settings.address = address
     settings.working_hours = working_hours
+    settings.ordering_open_time = open_time
+    settings.ordering_close_time = close_time
     settings.currency = currency
     settings.facebook_url = facebook_url or None
     settings.tiktok_url = tiktok_url or None

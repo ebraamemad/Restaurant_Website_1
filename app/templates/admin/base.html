@@ -27,6 +27,7 @@
           <a href="/admin/orders" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/orders') %}bg-slate-100{% endif %}">الطلبات</a>
           <a href="/admin/customers" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/customers') %}bg-slate-100{% endif %}">العملاء</a>
           <a href="/admin/delivery-options" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/delivery-options') %}bg-slate-100{% endif %}">التوصيل والاستلام</a>
+          <a href="/admin/branches" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/branches') %}bg-slate-100{% endif %}">الفروع</a>
           <a href="/admin/settings" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/settings') %}bg-slate-100{% endif %}">الإعدادات</a>
           <a href="/admin/coupons" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/coupons') %}bg-slate-100{% endif %}">الكوبونات</a>
         <a href="#" id="admin-install-btn" class="rounded-full px-2.5 py-2 transition bg-emerald-100 text-emerald-700 hover:bg-emerald-200 sm:px-3" style="display:none">📱 تثبيت</a>
@@ -41,7 +42,7 @@
   <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/static/js/sw.js').catch(() => {});
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
     });
   }
 
