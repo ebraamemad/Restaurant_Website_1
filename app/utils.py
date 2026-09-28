@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import secrets
 import unicodedata
 from datetime import datetime, time as dt_time, timezone
 from decimal import Decimal
@@ -23,6 +25,53 @@ PAYMENT_METHOD_LABELS = {
     "ewallet": "محفظة إلكترونية",
     "card": "فيزا",
 }
+
+# ---------------------------------------------------------------------------
+# Phase 2: تتبّع الطلب بدون تسجيل دخول
+# ---------------------------------------------------------------------------
+# الفكرة كلها في سطرين: بنولّد token عشوائي 32 بايت، نرجعه للعميل **مرة
+# واحدة** وقت إنشاء الطلب، ونخزّن SHA-256 بتاعه في الداتابيز. العميل
+# بيحفظ الـtoken في المتصفح، ولما يفتح صفحة التتبع بنعمل lookup بالهاش.
+#
+# ليه بالظبط كده:
+# 1. مفيش login في V2، فمفيش فايدة من search by phone: الرقم متاح في
+#    نتائج محرك البحث وموجود في أخطاء الويب، والعميل غالباً بيدي رقم
+#    تاني. البحث بالرقم كمان بيخلّي أي حد يعرف رقم تاني يقدر يشوف طلبه.
+# 2. تخزين الهاش مش الـtoken: لو الداتابيز اتسرّبت، الـhashes مالهاش
+#    فايدة عملية — الرموز نفسها مش موجودة. عكس لو خزّنا الـtoken مباشرة
+#    كان أي dump = كل روابط التتبع شغّالة.
+# 3. 32 بايت random مش قابل للتخمين: 2^256 احتمال.
+#
+# Constant-time compare مش مطلوب هنا: هنقارن SQL equality على hex digest
+# ثابت الطول، مش في كود تفاضلي على سر.
+TRACKING_TOKEN_BYTES = 32
+
+
+def build_tracking_url(token: str) -> str:
+    """رابط صفحة تتبّع الطلب للعميل.
+
+    نسبي مش مطلق بالشكل ده: الجافاسكريبت في `cart.js` بيبنيه بنفسه من
+    `location.origin`، والكود ده بيستخدمه كـfallback أو في رسالة واتساب
+    على سيرفر مش ورا نفس الـdomain. أول ما Bearer/caching يبقى مطلوب
+    (إحنا مش محتاجينه دلوقتي)، الشكل ده هو المكان الطبيعي يتغيّر فيه.
+    """
+    return f"/track?token={quote(token, safe='')}"
+
+
+def generate_tracking_token() -> str:
+    """token عشوائي آمن للتتبع (hex). يُرجع مرة واحدة للعميل ولا يُخزّن."""
+    return secrets.token_hex(TRACKING_TOKEN_BYTES)
+
+
+def hash_tracking_token(token: str) -> str:
+    """SHA-256 hex للـtoken — هذا اللي بيتخزّن في `orders.order_tracking_hash`."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def new_tracking_credentials() -> tuple[str, str]:
+    """ترجع `(token, hash)`. الـtoken يروح للعميل، والـhash للداتابيز."""
+    token = generate_tracking_token()
+    return token, hash_tracking_token(token)
 
 
 def make_slug(value: str, fallback: str = "item") -> str:

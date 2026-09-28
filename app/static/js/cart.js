@@ -47,7 +47,167 @@ const Cart = {
   clear() {
     localStorage.removeItem(CART_KEY);
   },
+  /**
+   * دمج سطور إعادة الطلب في السلة الحالية.
+   *
+   * السطور الجاية من `/api/orders/reorder` و**متحقّقة منها على السيرفر**
+   * (product_id + option_ids + addon_ids بس، من غير أسماء ولا أسعار).
+   * عشان كده بنجيب الأسماء والأسعار من المنتج في `/api/products/by-id/{id}`
+   * — السلة بتخزّن الاسم والسعر محلياً للعرض، والـBackend بيعيد
+   * التحقق من كله وقت الإنشاء على أي حال.
+   *
+   * **الأسماء بتتجلّب من نفس الاستجابة**: الخيارات جاية في
+   * `option_groups[].options` والإضافات في `addons`. من غيرها السطر
+   * هيتحفظ ب IDs بس، والسلة بتعرض الأسماء — فالسطر هيبان فاضي
+   * والعميل مش هيعرف اشترى إيه.
+   */
+  async mergeFromReorder(lines) {
+    let merged = 0;
+    for (const line of lines || []) {
+      try {
+        const product = await this.fetchProductForCart(line.product_id);
+        if (!product) continue;
+        const optionIds = (line.option_ids || []).map(Number);
+        const addonIds = (line.addon_ids || []).map(Number);
+        this.add({
+          id: product.id,
+          name: product.name,
+          base_price: product.base_price,
+          quantity: line.quantity,
+          options: this.namedOptions(product, optionIds),
+          optionIds,
+          addons: this.namedAddons(product, addonIds),
+          addonIds,
+          item_note: line.item_note || "",
+        });
+        merged += 1;
+      } catch {
+        // منتج مش موجود — السيرفر كان المفروض يستبعده بـ`skipped`.
+      }
+    }
+    return merged;
+  },
+  /**
+   * أسماء الخيارات المختارة، بنفس الشكل اللي `Cart.add` بيخزّنه من
+   * صفحة المنتج: `{id, name, price_adjustment}`.
+   *
+   * لو الـid مش موجود في المنتج (اتشال من لوحة الأدمن بعد الطلب
+   * الأول) بنتخطّاه: العرض يفضّل سطر ناقص على سطر باسم غلط. التحقق
+   * الحقيقي بيحصل وقت إنشاء الطلب على السيرفر.
+   */
+  namedOptions(product, optionIds) {
+    const chosen = (product.option_groups || []).flatMap((g) => g.options || []);
+    return optionIds
+      .map((id) => chosen.find((o) => o.id === id))
+      .filter(Boolean)
+      .map((o) => ({
+        id: o.id,
+        name: o.name,
+        price_adjustment: Number(o.price_adjustment || 0),
+      }));
+  },
+  /** نفس الفكرة للإضافات: `{id, name, price}`. */
+  namedAddons(product, addonIds) {
+    const available = product.addons || [];
+    return addonIds
+      .map((id) => available.find((a) => a.id === id))
+      .filter(Boolean)
+      .map((a) => ({
+        id: a.id,
+        name: a.name,
+        price: Number(a.price || 0),
+      }));
+  },
+  async fetchProductForCart(productId) {
+    const resp = await fetch(`/api/products/by-id/${productId}`);
+    if (!resp.ok) return null;
+    return await resp.json();
+  },
 };
+
+// إعادة الطلب بتنادي `Cart.mergeFromReorder` من `order_history.js`،
+// وهو ملف تاني مش شايف `Cart`. التصدير ده عشان كل حاجة السلة في
+// namespace واحد.
+window.restaurantCart = Cart;
+
+// ===== العناوين المحفوظة على الجهاز =====
+// المكوّن ده لوحده (مش جوه `storeCart`) عشان صفحة التتبّع كمان
+// محتاجاه لو العميل حب يضيف عنوان من هناك.
+//
+// **ليه localStorage مش جدول في الداتابيز؟**
+// 1. V2 مفيهاش حسابات عملاء، فالجدول كان هيتقفل برقم موبايل — ورقم
+//    الموبايل مش هوية: ناس كتير بتشاركه، وفي طلبات حد تاني بيظهر.
+// 2. كل الـprivacy اللي الـtoken بيديه للعميل (لو الداتابيز اتسرّبت
+//    مفيش روابط تتبّع) هيتلخبط لو العنوان متخزّن جنبه.
+// 3. مفيش فايدة إن العميل ينسخ العنوان من جهازه عشان يطلب أسرع —
+//    ده use case حقيقي ومنتشر.
+//
+// التكلفة: العنوان مش بينتقل لجهاز تاني. ده مقصود ومكتوب في الصفحة
+// نفسها للعميل ("محفوظة على جهازك بس").
+const ADDRESS_KEY = "saved_addresses";
+const ADDRESS_LIMIT = 10;
+
+const AddressStore = {
+  read() {
+    try {
+      const raw = localStorage.getItem(ADDRESS_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .filter((a) => a && typeof a.text === "string" && a.text.trim().length >= 5)
+        .map((a) => ({
+          id: String(a.id || ""),
+          label: String(a.label || "المنزل"),
+          text: String(a.text).trim().slice(0, 350),
+        }));
+    } catch {
+      return [];
+    }
+  },
+  write(entries) {
+    try {
+      localStorage.setItem(ADDRESS_KEY, JSON.stringify(entries.slice(0, ADDRESS_LIMIT)));
+    } catch {
+      // الحصة ممتلئة أو محجوبة — مش بيمنع إتمام الطلب.
+    }
+  },
+  /**
+   * يحفظ عنوان. لو نفس العنوان متسجل قبل كده، بيرجّعه من غير تكرار
+   * (المقارنة بنص العنوان بعد trim و lowercase) — عشان تلميح العنوان
+   * ما يتقفلش على أدق فروق المسافات.
+   */
+  save(text, label) {
+    const clean = String(text || "").trim().slice(0, 350);
+    if (clean.length < 5) return this.read();
+    const entries = this.read();
+    const key = clean.toLowerCase();
+    const existing = entries.find((a) => a.text.toLowerCase() === key);
+    if (existing) {
+      // نحدّث التسمية بس — العميل لعنوان موجود.
+      existing.label = String(label || existing.label || "المنزل").slice(0, 30);
+      this.write(entries);
+      return entries;
+    }
+    entries.unshift({
+      // id تسلسلي local: مفيش حاجة بتبحث بيه في السيرفر.
+      id: `a${Date.now().toString(36)}`,
+      label: String(label || "المنزل").slice(0, 30),
+      text: clean,
+    });
+    this.write(entries);
+    return entries;
+  },
+  remove(id) {
+    const entries = this.read().filter((a) => a.id !== id);
+    this.write(entries);
+    return entries;
+  },
+  clear() {
+    localStorage.removeItem(ADDRESS_KEY);
+  },
+};
+window.restaurantAddressStore = AddressStore;
 
 // ===== سلة الصفحة الرئيسية (Alpine) =====
 function storeCart() {
@@ -75,13 +235,52 @@ function storeCart() {
     couponCode: "",
     couponValid: null,
     couponMessage: "",
-    selectedPaymentMethod: "cash",
+    // Phase 2: طرق الدفع بقت من `/api/payment-methods` — مفعّلة بس.
+    // `selectedPaymentMethod` بقي **id** مش نص ("cash"). السبب إن
+    // التسمية والاسم والأ-sort كلها قابلة للتغيير من الأدمن، والـid
+    // هو الوحيد الثابت. الكود القديم كان بيبعت `payment_method: "cash"`
+    // والعميل بيشوف "كاش" في dropdown وقيمة "cash" في الـwire.
+    paymentMethods: [],
+    selectedPaymentMethodId: null,
+    // معاينة الحساب من السيرفر — المصدر الوحيد للإجمالي النهائي.
     preview: { subtotal: 0, discount_amount: 0, delivery_fee: 0, total: 0 },
     previewLoading: false,
+    // رقم تسلسلي بيخلينا نتجاهل ردود `/preview` اللي رجعت متأخرة
+    // بعد ما العميل غيّر السلة تاني.
     _previewSeq: 0,
+    // `call_center`: الرسوم لسه متحددةش من المطعم. السيرفر بيرجّع صفر
+    // مؤقت مع `delivery_fee_pending: true`، والواجهة بتعرض "هتحدد"
+    // عشان صفر صريح كان هيتفهّم إنه توصيل ببلاش.
+    deliveryFeePending: false,
+    // Phase 2: العناوين المحفوظة على الجهاز.
+    savedAddresses: [],
+    selectedAddressId: null,
+    newAddressLabel: "",
+    saveAddressChecked: false,
+    useAddress(addr) {
+      this.selectedAddressId = addr.id;
+      this.customer.address = addr.text;
+    },
+    removeAddress(addr) {
+      this.savedAddresses = AddressStore.remove(addr.id);
+      if (this.selectedAddressId === addr.id) {
+        this.selectedAddressId = null;
+        this.customer.address = "";
+      }
+    },
+    persistSavedAddress() {
+      if (!this.saveAddressChecked) return;
+      this.savedAddresses = AddressStore.save(this.customer.address, this.newAddressLabel);
+      this.selectedAddressId = this.savedAddresses[0] ? this.savedAddresses[0].id : null;
+      this.saveAddressChecked = false;
+    },
+    // Phase 2: توكن طلب العميل الحالي — بيتحط بعد `submitOrder` بنجاح
+    // عشان نوديه على صفحة التتبّع.
+    trackingToken: null,
 
     load() {
       this.items = Cart.read();
+      this.savedAddresses = AddressStore.read();
       this.loadCheckout();
     },
     persist() {
@@ -90,10 +289,11 @@ function storeCart() {
 
     async loadCheckout() {
       try {
-        const [optionsResp, zonesResp, branchesResp] = await Promise.all([
+        const [optionsResp, zonesResp, branchesResp, methodsResp] = await Promise.all([
           fetch("/api/delivery-options"),
           fetch("/api/delivery-zones"),
           fetch("/api/branches"),
+          fetch("/api/payment-methods"),
         ]);
         if (optionsResp.ok) {
           this.deliveryOptions = await optionsResp.json();
@@ -106,6 +306,12 @@ function storeCart() {
           this.branches = await branchesResp.json();
           if (this.branches.length && this.selectedBranchId === null) {
             this.selectedBranchId = this.branches[0].id;
+          }
+        }
+        if (methodsResp.ok) {
+          this.paymentMethods = await methodsResp.json();
+          if (this.paymentMethods.length && this.selectedPaymentMethodId === null) {
+            this.selectedPaymentMethodId = this.paymentMethods[0].id;
           }
         }
       } catch {}
@@ -128,6 +334,25 @@ function storeCart() {
     isZone() {
       const opt = this.selectedDeliveryOption();
       return !!opt && opt.delivery_type === "zone";
+    },
+    // `call_center`: العميل يطلب من غير رسوم معروفة، والمطعم يحدّدها
+    // بعدين. العناوين لسه مطلوبة (الطلب بيتبعت لعنوان فعلي)، فمفيش
+    // استثناء زي الـpickup.
+    isCallCenter() {
+      const opt = this.selectedDeliveryOption();
+      return !!opt && opt.delivery_type === "call_center";
+    },
+    // أداة العرض: الرسوم جاية من السيرفر، فلو معلّقة بنعرض "هتحدد من
+    // المطعم" بدل الرقم. الرقم في الحالة دي صفر مؤقت، والعميل لو شافه
+    // هيقول الطلب ببلاش.
+    deliveryFeeText() {
+      if (this.deliveryFeePending) return "هتحدد من المطعم";
+      return this.formatPrice(this.preview.delivery_fee);
+    },
+    selectedPaymentMethod() {
+      return (
+        this.paymentMethods.find((m) => m.id === this.selectedPaymentMethodId) || null
+      );
     },
     minScheduledTime() {
       const d = new Date(Date.now() + 15 * 60000);
@@ -152,6 +377,7 @@ function storeCart() {
         this.preview = { subtotal: 0, discount_amount: 0, delivery_fee: 0, total: 0 };
         this.couponValid = null;
         this.couponMessage = "";
+        this.deliveryFeePending = false;
         return;
       }
       const seq = ++this._previewSeq;
@@ -176,6 +402,9 @@ function storeCart() {
             delivery_fee: Number(data.delivery_fee || 0),
             total: Number(data.total || 0),
           };
+          // `call_center` — الرسوم بتتحدد بعد التأكيد. الرقم صفر
+          // مؤقت، والـflag بيقول للواجهة تعرض "هتحدد" بدل صفر.
+          this.deliveryFeePending = data.delivery_fee_pending === true;
           if (this.couponCode.trim()) {
             this.couponValid = data.coupon_valid === true;
             this.couponMessage = data.coupon_message || "";
@@ -344,6 +573,14 @@ function storeCart() {
         this.error = "من فضلك اختر الفرع.";
         return;
       }
+      // طريقة دفع مفعّلة واحدة على الأقل. مفيش fallback لـ"cash" هنا:
+      // الـid اللي بيرجع من `/api/payment-methods` هو اللي بيتحقق منه
+      // السيرفر، و"cash" كـhardcode كانت هتخلّي الأدمن يقفل الدفع النقدي
+      // والعميل يفضل يطلبه.
+      if (!this.paymentMethods.length || this.selectedPaymentMethodId === null) {
+        this.error = "مفيش طريقة دفع مفعّلة — كلّم المطعم على الواتساب.";
+        return;
+      }
       // الوقت المحدد لازم يكون في المستقبل
       let pickupTime = null;
       if (this.scheduling === "scheduled") {
@@ -373,7 +610,9 @@ function storeCart() {
             delivery_zone_id: this.isZone() ? this.selectedZoneId : null,
             coupon_code: this.couponCode.trim() || null,
             pickup_time: pickupTime,
-            payment_method: this.selectedPaymentMethod,
+            // Phase 2: الـid من جدول `payment_methods` مش نص ثابت.
+            // السيرفر بيتأكد إن الطريقة مفعّلة ويخزن لقطة منها مع الطلب.
+            payment_method_id: this.selectedPaymentMethodId,
             // الفرع والقناة — السيرفر بيتحقق منهم تاني وبيربط
             // الطلب بفرع مفعّل قبل ما يحفظه.
             branch_id: this.selectedBranchId,
@@ -390,15 +629,28 @@ function storeCart() {
           return;
         }
         const data = await resp.json();
+        // العنوان بيتحفظ قبل ما السلة تتمسح — التحويل محتاج عنوان،
+        // ومفيش سبب نضيّع اختيار العميل لو الخطوة اللي بعدها فشلت.
+        this.persistSavedAddress();
         Cart.clear();
         this.items = [];
         this.preview = { subtotal: 0, discount_amount: 0, delivery_fee: 0, total: 0 };
+        // الـtoken بيرجع **مرة واحدة** هنا. بنحفظه في المتصفح قبل أي
+        // تحويل، عشان لو العميل رجع من واتساب يلاقي طلبه في السجل.
+        // مفيش استرجاع بعد كده — مفيش حساب ولا بريد ولا هاتف بتبعت عليه.
+        if (data.tracking_token) {
+          rememberOrderToken(data.tracking_token, data.order_id);
+        }
         if (this.orderChannel === "whatsapp" && data.whatsapp_url) {
+          // طلب `whatsapp`: العميل بيبعت رسالة جاهزة للمطعم. الطلب متحفظ
+          // في الداتابيز فعلاً والتوكن في المتصفح، فالطلب بيظهر في
+          // `/orders/history` والصفحة دي بتفتحه لوحدها.
           window.location.href = data.whatsapp_url;
         } else {
-          // طلب `system`: الطلب اتحفظ وقاعد في لوحة التحكم. من غير هندلة
-          // لواتساب، بنوديه على صفحة تأكيد عادية.
-          window.location.href = "/order/success?order_id=" + data.order_id;
+          // طلب `system`: بنوديه على صفحة التتبّع على طول. `/order/success`
+          // كان بيقبل رقم الطلب في الـquery، وده كان بيخلّي أي حد يفتح
+          // تأكيد أي طلب بالتخمين. التوكن هو اللي بيفتح طلب حد بعينه.
+          window.location.href = trackingUrlFor(data.tracking_token);
         }
       } catch {
         this.error = "تعذّر إرسال الطلب.";

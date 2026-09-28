@@ -670,16 +670,27 @@ class TestSystemOrderConfirmationPage:
     def test_the_success_page_shows_the_order_id(
         self, client: TestClient, menu
     ) -> None:
-        order_id = client.post(
-            "/orders", json=_payload(menu.id, channel="system")
-        ).json()["order_id"]
+        created = client.post("/orders", json=_payload(menu.id, channel="system")).json()
+        order_id = created["order_id"]
 
-        response = client.get(f"/order/success?order_id={order_id}")
+        # Phase 2: الصفحة بتطلب `token` مش `order_id`. رقم الطلب بقى
+        # معلومة عرض بعد ما التحقق ينجح، مش وسيلة تفويض — أي حد كان
+        # يقدر يفتح `/order/success?order_id=N` لأي N.
+        response = client.get(f"/order/success?token={created['tracking_token']}")
         assert response.status_code == 200
         assert str(order_id) in response.text
 
+    def test_a_token_from_another_order_does_not_open_this_page(
+        self, client: TestClient, menu
+    ) -> None:
+        created = client.post("/orders", json=_payload(menu.id, channel="system")).json()
+        response = client.get(
+            f"/order/success?token=wrong&order_id={created['order_id']}"
+        )
+        assert response.status_code == 404
+
     def test_an_unknown_order_is_a_404(self, client: TestClient) -> None:
-        assert client.get("/order/success?order_id=999999").status_code == 404
+        assert client.get("/order/success?token=nope").status_code == 404
 
 
 # ---------------------------------------------------------------------------

@@ -110,5 +110,14 @@ document.addEventListener('DOMContentLoaded', function() {
     <button onclick="dismissPWAInstall()" class="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-600 mt-2">لاحقًا</button>
   </div>
 </div>
+{# تحميل عام لكل الصفحات العامة: بيعرّف دوال توكنات التتبّع
+   (`rememberOrderToken` / `trackingUrlFor`) اللي بيحتاجها `cart.js` بعد
+   إنشاء الطلب و`order_history.js` في السجل. من غيره، إنشاء الطلب بيحفظ
+   توكن ضايع والصفحة بتعمل redirect لصفحة فاضية.
+
+   `defer` عشان ما يعطّلش الرسم، والصفحات اللي محتاجاه بسّط بيكملوا
+   تحميله من نفس الـCDN. #}
+<script src="/static/js/order_tracking_store.js" defer></script>
+{% block scripts %}{% endblock %}
 </body>
 </html>

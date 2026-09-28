@@ -8,6 +8,7 @@
     <option value="fixed">توصيل ثابت</option>
     <option value="pickup">استلام من المطعم</option>
     <option value="zone">توصيل حسب المنطقة</option>
+    <option value="call_center">طلب عبر مركز الاتصال (الرسوم تُحدد لاحقًا)</option>
   </select>
   <input name="fee" type="number" step="0.01" min="0" value="0" class="rounded border px-3 py-2" placeholder="رسوم التوصيل">
   <input name="estimated_time" class="rounded border px-3 py-2" placeholder="الوقت المتوقع (مثال: 30-45 دقيقة)">
@@ -27,18 +28,24 @@
             <option value="fixed" {% if option.delivery_type == "fixed" %}selected{% endif %}>توصيل ثابت</option>
             <option value="pickup" {% if option.delivery_type == "pickup" %}selected{% endif %}>استلام من المطعم</option>
             <option value="zone" {% if option.delivery_type == "zone" %}selected{% endif %}>توصيل حسب المنطقة</option>
+            <option value="call_center" {% if option.delivery_type == "call_center" %}selected{% endif %}>مركز الاتصال (الرسوم تُحدد لاحقًا)</option>
           </select>
         </label>
         <label class="text-sm text-slate-600">الترتيب
           <input name="sort_order" type="number" value="{{ option.sort_order }}" class="mt-1 w-full rounded border px-3 py-2">
         </label>
       </div>
+      {# حقل الرسوم كان ناقص من فورم التعديل: أي تعديل بيحفظ الرسوم بصفر،
+         فلو الأدمن عدّل اسم طريقة بس رجعت الرسوم لـ0 من غير ما ينتبه. #}
+      <label class="mb-2 block text-sm text-slate-600">رسوم التوصيل
+        <input name="fee" type="number" step="0.01" min="0" value="{{ option.fee }}" class="mt-1 w-full rounded border px-3 py-2">
+      </label>
       <input name="estimated_time" value="{{ option.estimated_time or '' }}" class="mb-2 w-full rounded border px-3 py-2" placeholder="الوقت المتوقع">
       <div class="mb-3 flex gap-4">
         <label><input name="is_active" type="checkbox" value="true" {% if option.is_active %}checked{% endif %}> نشط</label>
       </div>
       <button class="rounded bg-emerald-700 px-4 py-2 text-white">حفظ</button>
-      <button form="delete-option-{{ option.id }}" class="rounded bg-red-600 px-4 py-2 text-white">حذف</button>
+      <button form="delete-option-{{ option.id }}" class="rounded bg-red-600 px-4 py-2 text-white">تعطيل</button>
     </form>
     <form id="delete-option-{{ option.id }}" method="post" action="/admin/delivery-options/{{ option.id }}/delete">{{ csrf_field(request) }}</form>
   {% endfor %}
@@ -55,7 +62,7 @@
     <button class="rounded bg-slate-900 px-4 py-2 font-bold text-white md:col-span-4">إضافة منطقة</button>
   </form>
   <div class="grid gap-3 md:grid-cols-2">
-    {% for zone in zones %}<form method="post" action="/admin/delivery-zones" class="grid gap-2 rounded bg-white p-4 shadow-sm sm:grid-cols-4">{{ csrf_field(request) }}<input type="hidden" name="id" value="{{ zone.id }}"><input name="name" value="{{ zone.name }}" class="rounded border px-2 py-2"><input name="fee" type="number" step="0.01" min="0" value="{{ zone.fee }}" class="rounded border px-2 py-2"><input name="sort_order" type="number" min="0" value="{{ zone.sort_order }}" class="rounded border px-2 py-2"><label class="flex items-center gap-2 text-sm"><input name="is_active" type="checkbox" value="true" {% if zone.is_active %}checked{% endif %}> ظاهرة</label><button class="rounded bg-emerald-700 px-3 py-2 text-white sm:col-span-2">حفظ</button><button form="delete-zone-{{ zone.id }}" class="rounded bg-red-600 px-3 py-2 text-white sm:col-span-2">حذف</button></form><form id="delete-zone-{{ zone.id }}" method="post" action="/admin/delivery-zones/{{ zone.id }}/delete">{{ csrf_field(request) }}</form>{% else %}<p class="text-sm text-slate-500">لم تتم إضافة مناطق بعد.</p>{% endfor %}
+    {% for zone in zones %}<form method="post" action="/admin/delivery-zones" class="grid gap-2 rounded bg-white p-4 shadow-sm sm:grid-cols-4">{{ csrf_field(request) }}<input type="hidden" name="id" value="{{ zone.id }}"><input name="name" value="{{ zone.name }}" class="rounded border px-2 py-2"><input name="fee" type="number" step="0.01" min="0" value="{{ zone.fee }}" class="rounded border px-2 py-2"><input name="sort_order" type="number" min="0" value="{{ zone.sort_order }}" class="rounded border px-2 py-2"><label class="flex items-center gap-2 text-sm"><input name="is_active" type="checkbox" value="true" {% if zone.is_active %}checked{% endif %}> ظاهرة</label><button class="rounded bg-emerald-700 px-3 py-2 text-white sm:col-span-2">حفظ</button><button form="delete-zone-{{ zone.id }}" class="rounded bg-red-600 px-3 py-2 text-white sm:col-span-2">تعطيل</button></form><form id="delete-zone-{{ zone.id }}" method="post" action="/admin/delivery-zones/{{ zone.id }}/delete">{{ csrf_field(request) }}</form>{% else %}<p class="text-sm text-slate-500">لم تتم إضافة مناطق بعد.</p>{% endfor %}
   </div>
 </section>
 {% endblock %}

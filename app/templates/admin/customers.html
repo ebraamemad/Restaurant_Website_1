@@ -5,7 +5,10 @@
     <h1 class="mb-4 text-xl font-bold sm:text-2xl">العملاء</h1>
   </div>
   <div class="flex flex-wrap gap-2">
-    <a href="/admin/customers/export?sort={{ sort }}{% if q %}&q={{ q }}{% endif %}{% if min_orders %}&min_orders={{ min_orders }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}" class="rounded bg-slate-900 px-4 py-2 text-sm font-bold text-white">⬇ تصدير CSV</a>
+    {# `range` هنا ناقص من الرابط، فلو الأدمن اختار "آخر 30 يوم" وفلترت
+       بيه وقعد ينزّل CSV، الملف بيطلع فيه كل العملاء مش الفترة المعروضة
+       على الشاشة. لازم كل filter معروض في الصفحة يتبعت مع التصدير. #}
+    <a href="/admin/customers/export?sort={{ sort }}&range={{ range or 'all' }}{% if q %}&q={{ q }}{% endif %}{% if min_orders %}&min_orders={{ min_orders }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}" class="rounded bg-slate-900 px-4 py-2 text-sm font-bold text-white">⬇ تصدير CSV</a>
   </div>
 </div>
 <form method="get" class="mb-5 grid gap-3 rounded bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-5">

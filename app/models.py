@@ -165,6 +165,47 @@ class Addon(Base):
     order_item_addons: Mapped[List["OrderItemAddon"]] = relationship(back_populates="addon")
 
 
+class PaymentMethod(Base):
+    """طريقة دفع يديرها الأدمن.
+
+   Phase 2: `kind` للتوثيق فقط — `offline` يعني العميل بيدفع بنفسه عند
+    الاستلام/الاتصال، و`online` محجوز لبوابة دفع مستقبلية (مش متنفذة في
+    المرحلة دي). مفيش أي حقل هنا من نوع رقم كارت/PIN/بيانات بنكية — الحقول
+    المتاحة الاسم والوصف فقط، والطلب بيخزّن `code` + لقطة الاسم.
+
+    الاستبدال بـ`code` (مش id) في الطلبات: لو الأدمن غيّر الاسم أو عطّل
+    الطريقة، الطلب القديم يفضل يقرا `code` بتاعه واللقطة تفضل تعرض الاسم
+    وقت الطلب.
+    """
+
+    __tablename__ = "payment_methods"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(String(300))
+    # 'offline' | 'online' — توثيق للعرض، مش منطق دفع.
+    kind: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="offline", server_default="offline"
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    orders: Mapped[List["Order"]] = relationship(back_populates="payment_method_ref")
+
+    __table_args__ = (
+        CheckConstraint("kind IN ('offline', 'online')", name="ck_payment_methods_kind"),
+    )
+
+
 class Order(Base):
     __tablename__ = "orders"
 
@@ -195,7 +236,48 @@ class Order(Base):
     coupon_id: Mapped[Optional[int]] = mapped_column(ForeignKey("coupons.id", ondelete="SET NULL"), index=True)
     customer_id: Mapped[Optional[int]] = mapped_column(ForeignKey("customers.id", ondelete="SET NULL"), index=True)
     pickup_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # ===== Phase 2: الدفع =====
+    # `code` القديمة (V1) بتفضل موجودة ومش هنتلمسها — دي تاريخ.
     payment_method: Mapped[Optional[str]] = mapped_column(String(20))
+    payment_method_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("payment_methods.id", ondelete="SET NULL"), index=True
+    )
+    payment_method_code: Mapped[Optional[str]] = mapped_column(String(20))
+    # لقطة اسم/تعليمات طريقة الدفع وقت الطلب. لازم يبقى في الطلب مش بس في
+    # الجدول: لو الأدمن غيّر الاسم أو طريقة الدفع، الطلب القديم يفضل يعرض
+    # الاسم اللي العميل كان شايفه فعلاً لما طلب.
+    payment_method_label: Mapped[Optional[str]] = mapped_column(String(120))
+    payment_instructions: Mapped[Optional[str]] = mapped_column(String(300))
+    payment_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending", index=True
+    )
+    # مرجع العملية من بوابة الدفع مستقبلية. مش بنستخدمه في المرحلة دي.
+    payment_reference: Mapped[Optional[str]] = mapped_column(String(120))
+    payment_confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # ===== Phase 2: تتبع الطلب بدون تسجيل دخول =====
+    # هاش مش رمز. الـtoken نفسه (32 بايت عشوائي) بيرجع للعميل مرة واحدة في
+    # رد إنشاء الطلب، واللي بيتخزّن هنا هو SHA-256 بتاعه. يعني تسريب
+    # الداتابيز ما بي leakingش أي رابط تتبع شغّال.
+    order_tracking_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+
+    # ===== Phase 2: رسوم التوصيل اليدوية (Mode C) =====
+    # لازم يكون صريح إن الرسوم لسه متحددةش بدل ما نفترض صفر بصمت.
+    delivery_fee_pending: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
+    # ===== Phase 2: لقطات التوصيل =====
+    # الرسوم نفسها كانت بتتخزن من V1 (delivery_fee). الإضافي ده أسماء
+    # وطريقة التسليم وقت الطلب، عشان الطلب القديم يفضل مقروء حتى لو
+    # الأدمن عدّل المنطقة أو_method التوصيل بعد كده.
+    delivery_method_label: Mapped[Optional[str]] = mapped_column(String(150))
+    delivery_zone_label: Mapped[Optional[str]] = mapped_column(String(120))
+    delivery_estimated_time: Mapped[Optional[str]] = mapped_column(String(50))
+    delivery_type_snapshot: Mapped[Optional[str]] = mapped_column(String(20))
+    branch_name_snapshot: Mapped[Optional[str]] = mapped_column(String(160))
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -205,12 +287,23 @@ class Order(Base):
     delivery_zone: Mapped[Optional["DeliveryZone"]] = relationship(back_populates="orders")
     coupon: Mapped[Optional["Coupon"]] = relationship(back_populates="orders")
     customer: Mapped[Optional["Customer"]] = relationship(back_populates="orders")
+    payment_method_ref: Mapped[Optional["PaymentMethod"]] = relationship(back_populates="orders")
+    push_links: Mapped[List["OrderPushSubscription"]] = relationship(back_populates="order")
 
-    # القيد مكتوب في الـmodel كمان مش في الـmigration بس — عشان أي حد
-    # يقرأ الموديل يشوف القيم المسموحة من غير ما يفتح ملف الـmigration.
+    # القيود مكتوبة هنا كمان مش في الـmigration بس — أي حد يقرأ الموديل
+    # يشوف القيم المسموحة من غير ما يفتح ملف الـmigration.
     __table_args__ = (
         CheckConstraint(
             "channel IN ('system', 'whatsapp')", name="ck_orders_channel"
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'confirmed', 'preparing', 'ready', "
+            "'out_for_delivery', 'completed', 'delivered', 'cancelled')",
+            name="ck_orders_status",
+        ),
+        CheckConstraint(
+            "payment_status IN ('pending', 'confirmed', 'paid', 'failed')",
+            name="ck_orders_payment_status",
         ),
     )
 
@@ -287,6 +380,24 @@ class RestaurantSettings(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)  # وصف المطعم — يظهر في Hero والـFooter
     theme_colors: Mapped[Optional[str]] = mapped_column(String(500))  # JSON string for theme colors
     additional_info: Mapped[Optional[str]] = mapped_column(Text)  # Additional info displayed at bottom
+
+    # ===== Phase 2: تسمية التطبيق (PWA) =====
+    # لو فاضيين، الـmanifest بيرجع لاسم المطعم زي V1 بالظبط. الحقول دي
+    # كانت موجودة في داتابيز التطوير من 2026-09-21 والـmigration بتتبناها
+    # من غير ما تلمس الأعمدة الموجودة — فالعرض هنا لازم يطابق العرض
+    # الموجود فعلاً (160/80) مش العرض اللي كنت متوقعه أنا.
+    # سبب الاختيار: `alembic check` كان عايز يقصّ الأعمدة لـ120/40
+    # (العرض الجديد أصغر)، والقصّ = تعديل على بيانات موجودة. الزيادة
+    # مفيش فيها ضرر، والقصّ فيه ضرر.
+    pwa_name: Mapped[Optional[str]] = mapped_column(String(160))
+    pwa_short_name: Mapped[Optional[str]] = mapped_column(String(80))
+    pwa_icon_url: Mapped[Optional[str]] = mapped_column(String(500))
+
+    # ===== Phase 3: مفاتيح VAPID — محجوزة، مش مستخدمة في المرحلة دي =====
+    # المرحلة دي بتوثّق مكانها بس. مفيش إرسال إشعارات في المرحلة دي.
+    vapid_private_pem: Mapped[Optional[str]] = mapped_column(Text)
+    vapid_public_pem: Mapped[Optional[str]] = mapped_column(Text)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -303,6 +414,7 @@ class Customer(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     orders: Mapped[List["Order"]] = relationship(back_populates="customer")
+    push_subscriptions: Mapped[List["PushSubscription"]] = relationship(back_populates="customer")
 
 
 class ProductOptionGroup(Base):
@@ -373,6 +485,18 @@ class Coupon(Base):
 
 
 class DeliveryOption(Base):
+    """طريقة استلام/توصيل واحدة يعرضها الأدمن للعميل.
+
+    `delivery_type` بيحدد إزاي الرسوم بتتحسب على الـserver:
+    - `pickup`: استلام من المطعم — الرسوم **لازم** تكون صفر. بيتفرض في
+      `app/ordering.py` مش بس في الكود بتاع الأدمن، عشان مفيش طريق يعدّي
+      عليه رسوم استلام.
+    - `fixed`: رسوم ثابتة من العمود `fee`.
+    - `zone`: رسوم المنطقة المختارة من جدول `delivery_zones`.
+    - `call_center`: العميل يطلب من غير رسوم معروفة، والأدمن/كول سنتر
+      يحدّد الرسوم بعدين. `orders.delivery_fee_pending` بيبقى true عشان
+      الطلب يبقى واضح إنه ناقص، مش صفر بصمت.
+    """
     __tablename__ = "delivery_options"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -380,7 +504,7 @@ class DeliveryOption(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     estimated_time: Mapped[Optional[str]] = mapped_column(String(50))
-    delivery_type: Mapped[str] = mapped_column(String(20), default="fixed")  # pickup | fixed | zone
+    delivery_type: Mapped[str] = mapped_column(String(20), default="fixed")  # pickup | fixed | zone | call_center
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -388,8 +512,25 @@ class DeliveryOption(Base):
 
     orders: Mapped[List["Order"]] = relationship(back_populates="delivery_option")
 
+    __table_args__ = (
+        CheckConstraint(
+            "delivery_type IN ('pickup', 'fixed', 'zone', 'call_center')",
+            name="ck_delivery_options_delivery_type",
+        ),
+    )
+
 
 class DeliveryZone(Base):
+    """منطقة توصيل برسومها.
+
+    بتتربط بـ`orders.delivery_zone_id` بـ`ON DELETE SET NULL`، لكن **الحذف
+    نفسه بيتعمل كإلغاء تفعيل مش DROP** (انظر `delete_delivery_zone` في
+    `app/routers/admin.py`): الرسوم والاسم محفوظين في لقطات على الطلب نفسه،
+    فحذف الصف بيسيب `delivery_zone_id = NULL` ويخلي العرض التاريخي ناقص.
+    zone_id = NULL` بيكسر تاريخ الطلب. التلغيف بدل الحذف بيحافظ على
+    السجل وبيخفي المنطقة من اختيار العميل الجديد.
+    """
+
     __tablename__ = "delivery_zones"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -401,4 +542,71 @@ class DeliveryZone(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     orders: Mapped[List["Order"]] = relationship(back_populates="delivery_zone")
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 foundation — Web Push (NOT implemented in Phase 2)
+# ---------------------------------------------------------------------------
+# الموديلات دي موجودة عشان المرحلة الجاية (الإشعارات) تلاقي المخطط جاهز
+# ومعلَن في الـmodels والـmigrations بدل ما يكون drift غامض. **مفيش أي
+# كود في المرحلة دي بيقرأ أو يكتب الجداول دي**، ومفيش إرسال إشعارات.
+# الجداول دي كانت موجودة في داتابيز التطوير من شغل يوم 2026-09-21 اللي
+# ضاعت شيفرته — الـmigration الحالية بتتبنّاها مش بتعمل DROP.
+
+
+class PushSubscription(Base):
+    """اشتراك Web Push لجهاز/متصفح عميل — أساس المرحلة الجاية فقط."""
+
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # `unique=True, index=True` = فهرس فريد واحد اسمه
+    # `ix_push_subscriptions_endpoint`. الـendpoint هو مفتاح device
+    # فعليًا: نفس المتصفح بيرسل نفس الـendpoint في كل تسجيل، ولو سمحنا
+    # بتكراره هنجمع صفوف بتاعت نفس الجهاز ونبعت له الإشعار مرتين.
+    # الفهرس الفريد بيفرض `upsert` بـON CONFLICT — واليوم مفيش
+    # endpoints أصلاً، بس لازم الـconstraint يبقى موجود من دلوقتي قبل
+    # ما الكود يتكتب.
+    endpoint: Mapped[str] = mapped_column(String(600), nullable=False, unique=True, index=True)
+    p256dh: Mapped[str] = mapped_column(String(300), nullable=False)
+    auth: Mapped[str] = mapped_column(String(200), nullable=False)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(400))
+    device: Mapped[Optional[str]] = mapped_column(String(40))
+    customer_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("customers.id", ondelete="SET NULL"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    customer: Mapped[Optional["Customer"]] = relationship(back_populates="push_subscriptions")
+    order_links: Mapped[List["OrderPushSubscription"]] = relationship(
+        back_populates="subscription", cascade="all, delete-orphan"
+    )
+
+
+class OrderPushSubscription(Base):
+    """ربط طلب باشتراك — عشان المرحلة الجاية تعرف تبعت لكل من طلبه.
+
+    كـaudit trail للاستخدام: مين كان مطلوب إشعاره لطلب معيّن.
+    """
+
+    __tablename__ = "order_push_subscriptions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"), index=True
+    )
+    subscription_id: Mapped[int] = mapped_column(
+        ForeignKey("push_subscriptions.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    order: Mapped["Order"] = relationship(back_populates="push_links")
+    subscription: Mapped["PushSubscription"] = relationship(back_populates="order_links")
 

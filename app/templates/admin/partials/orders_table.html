@@ -27,15 +27,25 @@
             <div class="text-[11px] text-slate-400">فرعي {{ order.subtotal }}{% if order.discount_amount %} - خصم {{ order.discount_amount }}{% endif %}{% if order.delivery_fee %} + توصيل {{ order.delivery_fee }}{% endif %}</div>
           </td>
           <td class="p-3">
-            <form method="post" action="/admin/orders/{{ order.id }}/status">
-              {{ csrf_field(request) }}
-              <select name="status_value" class="rounded border px-2 py-1" onchange="this.form.submit()">
-                {% for status in statuses | default([]) %}
-                  <option value="{{ status.value }}" {% if order.status == status.value %}selected{% endif %}>{{ status_labels[status.value] }}</option>
-                {% endfor %}
-              </select>
-              {% if not statuses %}{{ status_labels[order.status] if status_labels else order.status }}{% endif %}
-            </form>
+            {# الحالات المسموح بيها من الحالة الحالية بس — الباقي
+               بيرمي 400 في `update_order_status`. نعرض الخطوة الجاية
+               كـbutton لأن الموظف بيكمل الرحلة، مش بيفكّر في كل
+               الحالات. #}
+            <div class="flex flex-wrap gap-1.5">
+              {% for value in (allowed_by_order | default({})).get(order.id, []) %}
+                {% if value != order.status %}
+                  <form method="post" action="/admin/orders/{{ order.id }}/status">
+                    {{ csrf_field(request) }}
+                    <input type="hidden" name="status_value" value="{{ value }}">
+                    <button class="rounded border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100">
+                      {{ status_labels.get(value, value) }}
+                    </button>
+                  </form>
+                {% endif %}
+              {% endfor %}
+            </div>
+            <div class="mt-1 font-bold text-slate-800">{{ status_labels.get(order.status, order.status) }}</div>
+            <a class="text-xs text-emerald-700 hover:underline" href="/admin/orders/{{ order.id }}">تفاصيل</a>
           </td>
           <td class="p-3">{{ order.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
           <td class="p-3">

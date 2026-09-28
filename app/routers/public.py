@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
@@ -21,11 +21,13 @@ from app.models import (
     OrderItem,
     OrderItemAddon,
     OrderItemOption,
+    PaymentMethod,
     Product,
     ProductOptionGroup,
     RestaurantSettings,
 )
-from app.ordering import compute_pricing, validate_scheduled_time
+from app.order_tracking import build_tracked_order, find_order_by_token
+from app.ordering import compute_pricing, resolve_payment_method, validate_scheduled_time
 from app.schemas import (
     AddonOut,
     BranchOut,
@@ -34,14 +36,17 @@ from app.schemas import (
     OrderCreated,
     OrderStatus,
     OrderingStatusOut,
+    PaymentStatus,
     ProductDetailOut,
 )
 from app.utils import (
     PHONE_INVALID_MESSAGE,
     build_search_variants,
+    build_tracking_url,
     build_whatsapp_message,
     build_whatsapp_url,
     is_within_ordering_hours,
+    new_tracking_credentials,
     normalize_phone,
     ordering_hours_message,
     parse_theme_colors,
@@ -109,26 +114,116 @@ def list_branches(db: Session = Depends(get_db)) -> List[BranchOut]:
     return [BranchOut.model_validate(branch) for branch in branches]
 
 
+def resolve_requested_payment_method(db: Session, payload: OrderCreate) -> PaymentMethod:
+    """تحدّد طريقة الدفع من الطلب، مع دعم الشكل القديم بتاع V1.
+
+    - `payment_method_id` (الجديد): بيتحقق منه إنه موجود **و** مفعّل. رقم
+      من المتصفح مشيثق منه، فلازم نرفض أي method معطّلة.
+    - `payment_method` (قديم، نص زي "cash"): بيتحول لـrow عن طريق `code`
+      عشان ماحدش من عملاء V1 يbreaking. لو مش موجودة أو معطّلة → 400
+      صريح، مش fallback صامت لـcash: العميل اختار طريقة ولاقى إنه
+      اتسجّلت في حاجة تانية، وده أسوأ من رفض الطلب.
+    """
+    if payload.payment_method_id is not None:
+        return resolve_payment_method(db, payload.payment_method_id)
+
+    legacy_code = (payload.payment_method or "cash").strip()
+    method = db.scalar(select(PaymentMethod).where(PaymentMethod.code == legacy_code))
+    if method is None or not method.is_active:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "طريقة الدفع المحددة غير متاحة"
+        )
+    return method
+
+
 @router.get("/order/success", response_class=HTMLResponse)
 def order_success(
     request: Request,
-    order_id: int,
+    token: str = "",
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    """صفحة تأكيد الطلب في الموقع (طلب `system`).
+    """صفحة تأكيد الطلب (طلب `system`).
 
-    بتعرض رقم الطلب بس — مفيش أي بيانات عميل أو سعر بيتسرّب في الـURL.
+    بتطلب `token` مش `order_id`. الشكل القديم كان بياخد رقم الطلب في
+    الـquery، وأي حد يخمّن الأرقام (12 طلب في داتابيز التطوير) كان
+    بيفتح تأكيد أي طلب. رقم الطلب هنا **معلومة العرض** بس بعد ما
+    التحقق بالهاش نجح — يعني مش وسيلة التفويض.
+
+    التوكن غلط بيرجّع نفس 404 بتاع صفحة التتبّع.
     """
-    order = db.get(Order, order_id)
+    order = find_order_by_token(db, token)
     if order is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "الطلب مش موجود")
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "الطلب مش موجود أو الرابط غير صحيح"
+        )
     return templates.TemplateResponse(
         "public/order_success.html",
         {
             "request": request,
             "order_id": order.id,
+            "tracking_url": build_tracking_url(token),
             "settings": get_settings(db),
         },
+    )
+
+
+# ============================================================
+# Phase 2 — تتبّع الطلب وسجل طلبات العميل
+# ============================================================
+
+
+@router.get("/track", response_class=HTMLResponse)
+def track_order_page(
+    request: Request,
+    token: str = "",
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """صفحة تتبّع الطلب.
+
+    التوكن جاي في query string عشان يبقى قابل للمشاركة (العميل يبعت
+    اللينك لصاحبه). مش في path: path بتتسجّل في access logs السيرفر
+    بشكل طبيعي، والـquery في الب-forms أقل. الخيار الحقيقي security-wise
+    هو إن التتبع behind token 256-بت أساساً، فمكان التوكن في الـURL
+    مش هو العامل الحاسم.
+
+    طلب بـtoken مش صحيح بيرجّع **نفس** 404 بتاع طلب مش موجود: مفيش
+    فايدة نخبر حد إن الـid ده موجود بس مش ملكه.
+    """
+    order = find_order_by_token(db, token)
+    if order is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "الطلب مش موجود أو الرابط غير صحيح"
+        )
+    restaurant_settings = get_settings(db)
+    return templates.TemplateResponse(
+        "public/track_order.html",
+        {
+            "request": request,
+            "token": token,
+            "order": build_tracked_order(order, restaurant_settings.currency),
+            "settings": restaurant_settings,
+        },
+    )
+
+
+@router.get("/orders/history", response_class=HTMLResponse)
+def order_history_page(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """صفحة سجل طلبات العميل.
+
+    الصفحة **فاضية من ناحية السيرفر**: مفيش طلبات بتترجّع. العميل بيقرا
+    التوكنات من `localStorage` ويطلب كل طلب لوحده.
+
+    ليه: السجل keyed by token، والـtokens عند العميل. لو رجعنا كل
+    الطلبات من السيرفر، هنكون محتاجين-account أو بريد — أي منهم
+    بيكسر "بلا تسجيل دخول". ولو رجعناها بـtoken من الـURL، يبقى أي حد
+    عنده توكن واحد بيشوف كل طلبات العميل.
+    """
+    return templates.TemplateResponse(
+        "public/order_history.html",
+        {"request": request, "settings": get_settings(db)},
     )
 
 
@@ -181,21 +276,44 @@ def home(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
 
 @router.get("/manifest.json")
 def get_manifest(db: Session = Depends(get_db)) -> dict:
+    """ملف PWA.
+
+    `pwa_name` / `pwa_short_name` / `pwa_icon_url` حقول اختيارية في
+    `restaurant_settings`: لو الأدمن سيبها فاضية، الـmanifest بيرجع
+    لاسم المطعم زي V1 بالظبط. دي موجودة من قبل Phase 2 في داتابيز
+    التطوير والـmigration بتتبناها.
+
+    **الاسم لـ`short_name` بيتقصّ على 12 محرف** زي ما المتصفح بيتوقع
+    (الحد في شرط قابلية التثبيت) — الاسم الحقيقي على الشاشة الرئيسية
+    بيتم قطعه من المتصفح أصلاً، فبنقصّه إحساسًا متسق مع اللي
+    المستخدم بيشوفه.
+    """
     settings = get_settings(db)
     theme = parse_theme_colors(settings)
-    if settings.app_icon_url:
+
+    # الأولوية: حقل PWA المخصّص، وبعدين `app_icon_url` (اللي كان
+    # بيرجّع لـicons)، وبعدين الأيقونات الثابتة في `/static`.
+    icon_url = settings.pwa_icon_url or settings.app_icon_url
+    if icon_url:
         icons = [
-            {"src": settings.app_icon_url, "sizes": "192x192", "type": "image/png"},
-            {"src": settings.app_icon_url, "sizes": "512x512", "type": "image/png"},
+            {"src": icon_url, "sizes": "192x192", "type": "image/png"},
+            {"src": icon_url, "sizes": "512x512", "type": "image/png"},
         ]
     else:
         icons = [
             {"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
             {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
         ]
+
+    short_name = (
+        settings.pwa_short_name
+        or settings.restaurant_name
+        or "Restaurant"
+    )[:12]
+
     return {
-        "name": settings.restaurant_name or "Restaurant Ordering",
-        "short_name": settings.restaurant_name or "Restaurant",
+        "name": settings.pwa_name or settings.restaurant_name or "Restaurant Ordering",
+        "short_name": short_name,
         "description": settings.description or "نظام طلب إلكتروني للمطعم",
         "start_url": "/",
         "scope": "/",
@@ -314,6 +432,16 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
     # 1) موعد الطلب المجدول (استلام/توصيل) لازم يكون في المستقبل.
     scheduled_time = validate_scheduled_time(payload.pickup_time)
 
+    # 1.b) طريقة الدفع. العميل بيبعت `payment_method_id` (الطريقة الجديدة)،
+    #      والعميل القديم بيبعت `payment_method` كنص. الأول بيتحوّل للتاني
+    #      عن طريق `code` عشان ميكسرش أي عميل V1 لسه شغال.
+    payment_method = resolve_requested_payment_method(db, payload)
+
+    # 1.c) رمز التتبّع: 32 بايت عشوائي، هنخزّن الـhash بتاعه ونرجّع
+    #      الـtoken نفسه للعميل مرة واحدة. الـtoken مش بيتخزّن في الداتابيز
+    #      في أي مكان — لو الداتابيز اتسرّبت، مفيش روابط تتبّع شغّالة.
+    tracking_token, tracking_hash = new_tracking_credentials()
+
     # 2) كل الحسابات تتعاد من Database — لا ثقة في أي سعر قادم من العميل.
     pricing = compute_pricing(
         db,
@@ -331,6 +459,11 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "العنوان مطلوب لطلبات التوصيل")
 
     # 4) بناء الطلب مع حفظ لقطة الأسعار والتفصيلة الكاملة وقت الإنشاء.
+    #
+    #    لقطات الطقس/الدفع/التوصيل كلها بتتخزّن **وقت الطلب** عن قصد:
+    #    لو الأدمن غيّر اسم طريقة الدفع أو اسم الفرع أو رسوم المنطقة بعد
+    #    كده، الطلب القديم لازم يفضل يعرض اللي العميل شافه فعلاً، مش
+    #    الحالة الحالية. من غير ده، تاريخ الفواتير بيتغير بأوامر لاحقة.
     order = Order(
         customer_name=payload.customer_name,
         customer_phone=payload.customer_phone,
@@ -343,13 +476,27 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
         total=pricing.total,
         whatsapp_message="",
         branch_id=branch.id,
+        branch_name_snapshot=branch.name,
         channel=payload.channel.value,
         delivery_option_id=delivery_option.id if delivery_option else None,
         delivery_zone_id=pricing.delivery_zone.id if pricing.delivery_zone else None,
         coupon_id=pricing.coupon.id if pricing.coupon else None,
         pickup_time=scheduled_time,
-        payment_method=payload.payment_method,
+        # `payment_method` القديمة بتفضل فاضية دلوقتي: `payment_method_id`
+        # بقى المصدر. بس بنخليها تنكتب عشان أي كود قديم لسه بيقراها.
+        payment_method=payment_method.code,
+        payment_method_id=payment_method.id,
+        payment_method_code=payment_method.code,
+        payment_method_label=payment_method.name,
+        payment_instructions=payment_method.description,
+        payment_status=PaymentStatus.pending.value,
+        delivery_fee_pending=pricing.delivery_fee_pending,
+        delivery_method_label=delivery_option.name if delivery_option else None,
+        delivery_zone_label=pricing.delivery_zone.name if pricing.delivery_zone else None,
+        delivery_estimated_time=delivery_option.estimated_time if delivery_option else None,
+        delivery_type_snapshot=delivery_option.delivery_type if delivery_option else None,
     )
+    order.order_tracking_hash = tracking_hash
 
     message_items: List[dict] = []
     for line in pricing.lines:
@@ -439,6 +586,9 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
         db.add(pricing.coupon)
 
     # 8) حفظ الطلب أولًا لمعرفة رقمه، ثم بناء رسالة WhatsApp برقم الطلب.
+    #    الـtracking token اتولّد **قبل** الكتابة (خط 4) وربط بالهاش، لأن
+    #    الـtoken نفسه بيرجع للعميل مرة واحدة في الرد. لو اتولّد بعد commit
+    #    كان فيه نافذة طلب اتحفظ من غير هاش — طلب غير قابل للتتبع للأبد.
     db.add(order)
     db.flush()
 
@@ -461,7 +611,9 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
         notes=payload.notes,
         pickup_time=scheduled_time,
         coupon_code=pricing.coupon_code,
-        payment_method=payload.payment_method,
+        # هنا بنبعت **الاسم** مش الـcode: رسالة واتساب بتتقري من موظف،
+        # و"كاش" أوضح من "cash" ليه.
+        payment_method=payment_method.name,
     )
     order.whatsapp_message = message
 
@@ -486,4 +638,10 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
             if is_whatsapp
             else None
         ),
+        tracking_token=tracking_token,
+        tracking_url=build_tracking_url(tracking_token),
+        payment_method_code=order.payment_method_code,
+        payment_method_label=order.payment_method_label,
+        payment_status=order.payment_status,
+        delivery_fee_pending=order.delivery_fee_pending,
     )

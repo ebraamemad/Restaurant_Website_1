@@ -61,6 +61,10 @@ class PricingResult:
     delivery_zone: Optional[DeliveryZone] = None
     delivery_fee: Decimal = ZERO
     total: Decimal = ZERO
+    # `call_center`: الرسوم لسه متحددةش والأدمن هيحدّدها. الـfee بتبقى صفر
+    # بس `delivery_fee_pending` بيبقى true عشان ماحدش يقرأ الصفر ده على
+    # أنه رسوم نهائية. بيبقى false في كل الطرق التانية.
+    delivery_fee_pending: bool = False
 
 
 def resolve_priced_lines(db: Session, items: List["CartItemIn"]) -> List[PricedLine]:
@@ -316,7 +320,36 @@ def compute_pricing(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "لا يمكن اختيار منطقة مع الاستلام من المطعم")
     if delivery_option is not None and delivery_option.delivery_type == "zone" and delivery_zone is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "اختر منطقة التوصيل")
-    delivery_fee = quantize_money(delivery_zone.fee if delivery_zone is not None else (delivery_option.fee if delivery_option is not None else ZERO))
+
+    # =============================================================
+    # حساب الرسوم حسب نوع التسليم
+    # =============================================================
+    # `pickup`: الرسوم صفر **إلزامي**، مش merely convention. لو الأدمن
+    # حط رقماً في خانة الرسوم لطريقة استلام، الكود هنا بيلغيه — عشان
+    # العميل اللي بيستلم من المطعم مش المفروض يدفع رسوم توصيل.
+    #
+    # `fixed`: `delivery_options.fee`.
+    #
+    # `zone`: `delivery_zones.fee` للمنطقة المختارة (المتحقق منها في
+    # resolve_delivery_zone). لو اتسابت منطقة مع fixed، fee الجدول هو
+    # السائد.
+    #
+    # `call_center`: صفر + `delivery_fee_pending=True`. ده هو الفرق
+    # الجوهري عن V1: V1 كان بيرفض أي نوع مش معروف بـ400، فمفيش
+    # طريقة "العميل يطلب والأدمن يحدّد" كانت موجودة أصلاً.
+    delivery_fee_pending = False
+    if delivery_option is None:
+        delivery_fee = ZERO
+    elif delivery_option.delivery_type == "pickup":
+        delivery_fee = ZERO
+    elif delivery_option.delivery_type == "call_center":
+        # المنطقة بتتفضل مطلوبة لو موجودة، بس مش بتأثر على الرسوم.
+        delivery_fee = ZERO
+        delivery_fee_pending = True
+    elif delivery_option.delivery_type == "zone":
+        delivery_fee = quantize_money(delivery_zone.fee)  # منطقة مطلوبة ومتحقق منها فوق
+    else:  # fixed
+        delivery_fee = quantize_money(delivery_option.fee)
 
     coupon: Optional[Coupon] = None
     discount_amount = ZERO
@@ -337,7 +370,25 @@ def compute_pricing(
         delivery_zone=delivery_zone,
         delivery_fee=delivery_fee,
         total=total,
+        delivery_fee_pending=delivery_fee_pending,
     )
+
+
+def resolve_payment_method(db: Session, payment_method_id: Optional[int]):
+    """يجيب طريقة الدفع المفعّلة، أو يرفض الطلب لو غير صالحة.
+
+    الرفض ضروري مش تحسين: العميل بيبعت `payment_method_id` من المتصفح،
+    فلو قبلنا أي رقم كنا هنسجل طلب بمطريقة دفع مفعّلة الأدمن قفلها من
+    قبل كده، أو برقم أصلاً مش موجود.
+    """
+    from app.models import PaymentMethod  # استيراد محلي: Models هيكل ثقيل
+
+    if payment_method_id is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "اختر طريقة الدفع")
+    method = db.get(PaymentMethod, payment_method_id)
+    if method is None or not method.is_active:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "طريقة الدفع المحددة غير متاحة")
+    return method
 
 
 def validate_scheduled_time(pickup_time: Optional[datetime]) -> Optional[datetime]:

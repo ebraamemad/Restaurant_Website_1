@@ -65,6 +65,20 @@
     {% endif %}
   </label>
 
+  <h2 class="mt-2 text-lg font-bold md:col-span-2">التطبيق على الموبايل (PWA)</h2>
+  <p class="text-xs text-slate-500 md:col-span-2">
+    لو تسيب الخانة دي فاضية، التطبيق بياخد اسم المطعم. لو حطيت اسم، ده اللي
+    بيظهر على أيقونة الشاشة الرئيسية. الاسم المختصر بيتقصّ على 12 حرف.
+  </p>
+  <label class="text-sm font-semibold">اسم التطبيق
+    <input name="pwa_name" value="{{ settings.pwa_name or '' }}" maxlength="160"
+           class="mt-1 w-full rounded border px-3 py-2" placeholder="{{ settings.restaurant_name or 'مطعمك' }}">
+  </label>
+  <label class="text-sm font-semibold">الاسم المختصر
+    <input name="pwa_short_name" value="{{ settings.pwa_short_name or '' }}" maxlength="12"
+           class="mt-1 w-full rounded border px-3 py-2" placeholder="بالحروف">
+  </label>
+
   <h2 class="mt-2 text-lg font-bold md:col-span-2">معلومات أسفل الموقع (Footer)</h2>
   <textarea name="additional_info" rows="3" class="rounded border px-3 py-2 md:col-span-2" placeholder="نص معلومات عن المطعم يظهر أسفل الموقع">{{ settings.additional_info or "" }}</textarea>
 

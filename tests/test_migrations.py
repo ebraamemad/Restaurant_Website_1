@@ -56,16 +56,27 @@ class TestChainStructure:
         assert "b2c3d4e5f6a7" in chain
         assert names["b2c3d4e5f6a7"] == "b2c3d4e5f6a7_align_schema_with_models.py"
 
-    def test_the_phase1_branches_migration_is_the_head(self) -> None:
+    def test_the_phase1_branches_migration_is_on_the_chain(self) -> None:
         from tools.migration_report import load, order_chain
 
         names, down, _ = load()
         chain, _ = order_chain(down)
-        assert chain[-1] == "c3d4e5f6a7b8"
-        assert names[chain[-1]] == "c3d4e5f6a7b8_phase1_branches.py"
-        # الـhead الجديد لازم يكون متربّع على الـmigration اللي قبله، وإلا
-        # السلسلة اتقطعت و`down_revision` بيبقى غلط.
+        # Phase 2 أضافت migration فوق Phase 1، بس Phase 1 لازم تفضل
+        # متربّعة عليها: لو الـdown_revision اتغيّر، كل الـdeployments
+        # القديمة اللي وصلت لـ`c3d4e5f6a7b8` بقى عندها مسار تاني.
+        assert "c3d4e5f6a7b8" in chain
+        assert names["c3d4e5f6a7b8"] == "c3d4e5f6a7b8_phase1_branches.py"
         assert down["c3d4e5f6a7b8"] == "b2c3d4e5f6a7"
+
+    def test_the_phase2_payments_tracking_migration_is_the_head(self) -> None:
+        from tools.migration_report import load, order_chain
+
+        names, down, _ = load()
+        chain, _ = order_chain(down)
+        assert chain[-1] == "d4e5f6a7b8c9"
+        assert names[chain[-1]] == "d4e5f6a7b8c9_phase2_payments_tracking.py"
+        # لازم يكون متربّع على Phase 1 مباشرة — مفيش migration في النص.
+        assert down["d4e5f6a7b8c9"] == "c3d4e5f6a7b8"
 
 
 class TestNoDuplicateDdl:

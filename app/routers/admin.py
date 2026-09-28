@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -28,12 +29,21 @@ from app.models import (
     DeliveryZone,
     Order,
     OrderItem,
+    PaymentMethod,
     Product,
     ProductOption,
     ProductOptionGroup,
     RestaurantSettings,
 )
-from app.schemas import OrderStatus
+from app.ordering import ZERO, quantize_money
+from app.schemas import (
+    AdminDeliveryFeeIn,
+    OrderStatus,
+    PaymentStatusUpdateIn,
+    allowed_next_statuses,
+    coerce_order_status,
+    is_transition_allowed,
+)
 from app.security import csrf_field
 from app.utils import (
     PAYMENT_METHOD_LABELS,
@@ -56,11 +66,26 @@ templates.env.globals["theme_colors"] = parse_theme_colors
 templates.env.globals["whatsapp_url"] = lambda phone: build_whatsapp_url(phone, "")
 templates.env.globals["payment_labels"] = PAYMENT_METHOD_LABELS
 UPLOADS_DIR = Path(__file__).resolve().parents[1] / "uploads"
+# تسميات الحالات في لوحة التحكم، مفصولة عن `app/order_tracking.py` عن
+# قصد: الأدمن بيشوف "قيد الانتظار" والعميل بيشوف "تم استلام الطلب" لنفس
+# الحالة. تغيير تسمية الأدمن ما يمسّش حاجة بتظهر للعميل.
 STATUS_LABELS = {
     OrderStatus.pending.value: "قيد الانتظار",
+    OrderStatus.confirmed.value: "تم التأكيد",
     OrderStatus.preparing.value: "جاري التجهيز",
+    OrderStatus.ready.value: "جاهز للتسليم",
+    OrderStatus.out_for_delivery.value: "في الطريق",
+    OrderStatus.completed.value: "تم التسليم",
+    # legacy V1 — لسه في طلبات بالحالة دي
     OrderStatus.delivered.value: "تم التسليم",
     OrderStatus.cancelled.value: "تم الإلغاء",
+}
+
+PAYMENT_STATUS_LABELS = {
+    "pending": "لم يتم الدفع",
+    "confirmed": "مؤكد",
+    "paid": "مدفوع",
+    "failed": "فشل الدفع",
 }
 
 
@@ -311,6 +336,20 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin: Admin = De
             latest_orders_query = latest_orders_query.where(Order.created_at < end_dt)
     latest_orders = db.scalars(latest_orders_query).all()
     _, top_customers = get_dashboard_stats(db)
+    # نفس `allowed_by_order` بتاع صفحة الطلبات: الجدول في
+    # `partials/orders_table.html` بيعرض أزرار الخطوات الجاية، والـ
+    # partial ده مشترك بين اللوحة وصفحة الطلبات.
+    allowed_by_order: dict[int, list[str]] = {}
+    for order in latest_orders:
+        try:
+            current = coerce_order_status(order.status)
+        except ValueError:
+            allowed_by_order[order.id] = [s.value for s in OrderStatus]
+            continue
+        allowed_by_order[order.id] = [
+            s.value for s in allowed_next_statuses(current)
+        ] or [order.status]
+
     context = {
         "request": request,
         "admin": admin,
@@ -318,6 +357,7 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin: Admin = De
         "range_value": range_value,
         "analytics": analytics,
         "latest_orders": latest_orders,
+        "allowed_by_order": allowed_by_order,
         "top_customers": top_customers,
         "status_labels": STATUS_LABELS,
     }
@@ -704,10 +744,29 @@ def orders_page(
     )
     orders = db.scalars(statement).all()
 
+    # لكل طلب: الحالات المسموح ينتقل لها من حالته الحالية. القائمة
+    # بتعرض الخيارات دي بس بدل كل الحالات، عشان `<select>` مقصدش
+    # يرمي 400 على الموظف لما يختار حالة مش على مسار الطلب. التحقق في
+    # `update_order_status` بيفضل موجود — الـdropdown راحة للمستخدم،
+    # مش بوابة أمان.
+    allowed_by_order: dict[int, list[str]] = {}
+    for order in orders:
+        try:
+            current = coerce_order_status(order.status)
+        except ValueError:
+            # صف بحالة V1/تالفة: نعرض كل الحالات عشان الأدمن يقدر
+            # يصلّحه. التحقق في الـPOST بيرمي الـValueError دي كمان.
+            allowed_by_order[order.id] = [s.value for s in OrderStatus]
+            continue
+        allowed_by_order[order.id] = [
+            s.value for s in allowed_next_statuses(current)
+        ] or [order.status]
+
     search_query = (q or "").strip()
     return templates.TemplateResponse(
         "admin/orders.html",
         {"request": request, "orders": orders, "statuses": list(OrderStatus), "status_labels": STATUS_LABELS,
+         "allowed_by_order": allowed_by_order,
          "status_filter": status_filter, "date_from": date_from or "", "date_to": date_to or "",
          "q": search_query, "page": page, "total_pages": total_pages,
          "orders_count": orders_count, "sales_total": sales_total},
@@ -715,13 +774,166 @@ def orders_page(
 
 
 @router.post("/orders/{order_id}/status")
-def update_order_status(order_id: int, status_value: OrderStatus = Form(...), db: Session = Depends(get_db)) -> RedirectResponse:
+def update_order_status(
+    order_id: int,
+    status_value: OrderStatus = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    """تغيير حالة الطلب.
+
+    **بيتحقق من صحة الانتقال**، مش بس إن الحالة جديدة معروفة. من غير
+    ده، أي حد يقدر يرجّع طلب مسلّم لـ`pending` بضغطة على `<select>`
+    قديم في صفحة مفتوحة — وديBug طريقة بتأكل طلبات من غير ما حد ياخد
+    باله.
+
+    الانتقال لنفس الحالة مسموح (الـform بيرسل القيمة الحالية عند فتح
+    الصفحة). `confirmed → preparing` مسموح ومقصود: موظف ممكن يكون أكّد
+    وبعدين حد كمله، والانتظار لحد التأكيد بس إتفهّم.
+
+    ملاحظة: `payment_status` **مش** بيتغير هنا. حالة الدفع منفصلة عن
+    حالة الطلب (كاش لسه ما اتدفعش = `preparing` + `pending`)، ولها
+    endpoint لوحدها: `/orders/{id}/payment`.
+    """
     order = db.get(Order, order_id)
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
+
+    try:
+        current = coerce_order_status(order.status)
+    except ValueError:
+        # صف بحالة غريبة (legacy). أي حالة جديدة مقبولة منه، عشان
+        # الأدمن يقدر يصلّح صف تالف من غير تدخل يدوي في الداتابيز.
+        order.status = status_value.value
+        db.commit()
+        return redirect(f"/admin/orders/{order_id}")
+
+    if not is_transition_allowed(current, status_value):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"مش ممكن تنقل الطلب من «{STATUS_LABELS.get(current.value, current.value)}» "
+            f"إلى «{STATUS_LABELS.get(status_value.value, status_value.value)}»",
+        )
+
     order.status = status_value.value
     db.commit()
-    return redirect("/admin/orders")
+    return redirect(f"/admin/orders/{order_id}")
+
+
+@router.get("/orders/{order_id}", response_class=HTMLResponse)
+def order_detail_page(order_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    """صفحة الطلب الواحد — كل التفاصيل في مكان واحد.
+
+    V1 كان بيخلّي الموظف يفتح صفحة الطلبات ويدوّر على السطر الصح من غير
+    ما يشوف تفاصيل. وبما إن دلوقتي في لقطة رسوم + لقطات أسماء + حالة
+    دفع + تتبع، كل ده محتاج شاشة.
+    """
+    order = db.scalar(
+        select(Order)
+        .where(Order.id == order_id)
+        .options(
+            selectinload(Order.items).selectinload(OrderItem.options),
+            selectinload(Order.items).selectinload(OrderItem.addons),
+            selectinload(Order.delivery_option),
+            selectinload(Order.delivery_zone),
+            selectinload(Order.branch),
+            selectinload(Order.coupon),
+            selectinload(Order.customer),
+        )
+    )
+    if order is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
+
+    try:
+        current_status = coerce_order_status(order.status)
+    except ValueError:
+        current_status = None
+
+    return templates.TemplateResponse(
+        "admin/order_detail.html",
+        {
+            "request": request,
+            "order": order,
+            "current_status": current_status,
+            "allowed_statuses": allowed_next_statuses(current_status) if current_status else (),
+            # صف بحالة V1/تالفة: `allowed_statuses` فاضي، و`<select>`
+            # التصليح بيحتاج كل الحالات عشان يبقى فيه حاجة تختارها.
+            "statuses": list(OrderStatus),
+            "status_labels": STATUS_LABELS,
+            "payment_status_labels": PAYMENT_STATUS_LABELS,
+            "settings": get_or_create_settings(db),
+            "subtotal_label": lambda value: f"{value:.2f}",
+        },
+    )
+
+
+@router.post("/orders/{order_id}/payment")
+def update_order_payment(
+    order_id: int,
+    payload: PaymentStatusUpdateIn = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    """تحديث حالة الدفع من الأدمن.
+
+    الداتايز بتتحقق بـ`PaymentStatus` على مستوى الـschema، فحالة مش
+    معروفة بترجّع 422 من FastAPI قبل ما الكود يوصل هنا.
+
+    `payment_confirmed_at` بيتحط أول مرة بس لحد `paid`: العميل بيسأل
+    "امتى اتسجل الدفع؟" وسؤال واحد. لو الأدمن عدّل الحالة بعد كده،
+    الوقت الأصلي هو المهم.
+
+    حالة الطلب **مش** بتتغير هنا. طلب اتشال كاش (الدفع `failed`) لسه
+    محتاج مراجعة من المخزن أو يفضل ملغي.
+    """
+    order = db.get(Order, order_id)
+    if order is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
+
+    order.payment_status = payload.payment_status.value
+    if payload.payment_reference is not None:
+        stripped = payload.payment_reference.strip()
+        order.payment_reference = stripped or None
+    if payload.payment_status.value == "paid" and order.payment_confirmed_at is None:
+        order.payment_confirmed_at = datetime.now(timezone.utc)
+
+    db.commit()
+    return redirect(f"/admin/orders/{order_id}")
+
+
+@router.post("/orders/{order_id}/delivery-fee")
+def set_order_delivery_fee(
+    order_id: int,
+    payload: AdminDeliveryFeeIn = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    """تحديد رسوم طلب `call_center` يدوياً.
+
+    بتعيد حساب الإجمالي كمان — الرسوم مش بتتحدّد مستقلة عن الإجمالي،
+    `total = subtotal - discount + delivery_fee`. لو بسطرنا العمود ده
+    من غير الإجمالي، العرض في اللوحة وفي صفحة العميل هيبقوا
+    متعارضين. الخصم بيتساب من الـsubtotal زي ما هو، فالنتيجة النهائية
+    للعميل هي اللي بتتغير بزيادة/نقص الرسوم.
+
+    `delivery_fee_pending` بيبقى false بعدها: الأدمن حدّد رقم، فمفيش
+    حاجة معلّقة.
+    """
+    order = db.get(Order, order_id)
+    if order is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
+
+    fee = quantize_money(payload.delivery_fee)
+    order.delivery_fee = fee
+    order.delivery_fee_pending = False
+    order.total = quantize_money(
+        order.subtotal - order.discount_amount + fee
+    )
+    if order.total < ZERO:
+        # الخصم أكبر من الـsubtotal + رسوم. V1 كان بيقفل الإجمالي عند
+        # صفر وقت الإنشاء، فلو الأدمن رفع الرسوم بعد كده مش لازم
+        # الإجمالي يبقى بالسالب. الصفر أقل معقول.
+        order.total = ZERO
+
+    db.commit()
+    return redirect(f"/admin/orders/{order_id}")
 
 
 def _coupon_status(coupon: Coupon, now: datetime) -> str:
@@ -846,10 +1058,20 @@ def save_delivery_zone(
 
 @router.post("/delivery-zones/{zone_id}/delete")
 def delete_delivery_zone(zone_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    """إلغاء تفعيل منطقة، مش حذفها.
+
+    `db.delete` هنا كان بيحط `delivery_zone_id = NULL` في كل الطلبات
+    اللي استخدمت المنطقة. الرسوم في الطلب بتفضل (في `orders.delivery_fee`)
+    بس **اسم المنطقة** بيضيع، فلما الأدمن يفتح طلب من شهر فاتح بيشوف
+    "توصيل" من غير اسم المنطقة اللي اتحسبت عليه الرسوم.
+
+    soft delete بتخفي المنطقة من اختيار العميل الجديد وبتسيب كل
+    الأرقام في مكانها. إعادة التفعيل لوحدها من نفس الشاشة.
+    """
     zone = db.get(DeliveryZone, zone_id)
     if zone is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "منطقة التوصيل غير موجودة")
-    db.delete(zone)
+    zone.is_active = False
     db.commit()
     return redirect("/admin/delivery-options")
 
@@ -901,6 +1123,7 @@ def customers_page(
 
 @router.get("/customers/export")
 def export_customers(
+    request: Request,
     sort: str = "spent",
     q: Optional[str] = None,
     range: str = "all",
@@ -909,7 +1132,11 @@ def export_customers(
     date_to: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> Response:
-    start_dt, end_dt = None, None
+    # نفس منطق `customers_page` بالظبط. قبل التصحيح كان `range` متقبل
+    # في الـsignature ومبتقراش منه حاجة: الأدمن بيفلتر "آخر 30 يوم"،
+    # الشاشة بتظهر 12 عميل، والملف Between لو.out 400. الشاشة والملف
+    # لازم يكونوا نفس الـquery، وإلا حد بيتعامل مع أرقام غلط.
+    start_dt, end_dt, _ = parse_dashboard_range(request)
     if date_from:
         try:
             start_dt = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -984,7 +1211,7 @@ def save_delivery_option(
     is_active: bool = Form(default=False),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
-    if delivery_type not in {"pickup", "fixed", "zone"}:
+    if delivery_type not in {"pickup", "fixed", "zone", "call_center"}:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "نوع التوصيل غير صالح")
     if fee < 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "الرسوم لا يمكن أن تكون سالبة")
@@ -993,6 +1220,9 @@ def save_delivery_option(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "طريقة التوصيل غير موجودة")
     option.name = name.strip()
     option.description = description or None
+    # `pickup` و`call_center` الرسوم فيهم مش مستخدمة في الحساب (صفر +
+    # pending). بنحفظ الرقم اللي بيه الأدمن عايز clarifies الأرقام، بس
+    # `compute_pricing` هو اللي بيتجاهله — الحسبة-side مش form-side.
     option.fee = fee
     option.estimated_time = estimated_time or None
     option.sort_order = sort_order
@@ -1011,11 +1241,111 @@ def save_delivery_option(
 def delete_delivery_option(option_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
     option = db.get(DeliveryOption, option_id)
     if option is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Delivery option not found")
-    # orders.delivery_option_id FK هو ON DELETE SET NULL فالحذف آمن — الرسوم المحفوظة في الطلبات تفضل موجودة.
-    db.delete(option)
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "طريقة التوصيل غير موجودة")
+    # نفس منطق المنطقة: soft delete مش حذف. `delivery_option_id = NULL`
+    # كانت بتخلي طلب قديم يفقد اسم طريقة التوصيل اللي اتحسبت عليه.
+    option.is_active = False
     db.commit()
     return redirect("/admin/delivery-options")
+
+
+# ============================================================
+# Phase 2 — إدارة طرق الدفع
+# ============================================================
+
+
+@router.get("/payment-methods", response_class=HTMLResponse)
+def payment_methods_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    methods = db.scalars(
+        select(PaymentMethod).order_by(PaymentMethod.sort_order, PaymentMethod.name)
+    ).all()
+    return templates.TemplateResponse(
+        "admin/payment_methods.html",
+        {
+            "request": request,
+            "methods": methods,
+            "usage_counts": _payment_method_usage(db),
+            "settings": get_or_create_settings(db),
+        },
+    )
+
+
+def _payment_method_usage(db: Session) -> dict[int, int]:
+    """عدد الطلبات لكل طريقة — عشان الأدمن يفهم impact الإلغاء.
+
+    من غير الأرقام دي، الأدمن ممكن يدوس "تعطيل" على طريقة فيها 200
+    طلب من غير ما يعرف. الأرقام للعلم فقط: التعطيل مسموح في كل الأحوال
+    (الطلبات القديمة شايفة اللقطة بتاعتها).
+    """
+    rows = db.execute(
+        select(Order.payment_method_id, func.count(Order.id))
+        .where(Order.payment_method_id.is_not(None))
+        .group_by(Order.payment_method_id)
+    ).all()
+    return {row[0]: row[1] for row in rows if row[0] is not None}
+
+
+@router.post("/payment-methods")
+def save_payment_method(
+    id: Optional[int] = Form(default=None),
+    code: str = Form(...),
+    name: str = Form(...),
+    description: Optional[str] = Form(default=None),
+    kind: str = Form(default="offline"),
+    sort_order: int = Form(default=0),
+    is_active: bool = Form(default=False),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    if kind not in {"offline", "online"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "نوع الدفع غير صالح")
+    normalized_code = code.strip().lower()
+    if not normalized_code:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "كود طريقة الدفع مطلوب")
+    if not re.fullmatch(r"[a-z0-9_]{1,20}", normalized_code):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "الكود لازم يكون حروف إنجليزية صغيرة وأرقام و _ بس، 20 حرف على الأكثر",
+        )
+    stripped_name = name.strip()
+    if not stripped_name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "اسم طريقة الدفع مطلوب")
+
+    existing = db.scalar(select(PaymentMethod).where(PaymentMethod.code == normalized_code))
+    if existing is not None and existing.id != id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "الكود مستخدم في طريقة دفع تانية")
+
+    method = db.get(PaymentMethod, id) if id else PaymentMethod()
+    if id and method is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "طريقة الدفع غير موجودة")
+    method.code = normalized_code
+    method.name = stripped_name
+    method.description = (description or "").strip() or None
+    method.kind = kind
+    method.sort_order = sort_order
+    method.is_active = is_active
+    db.add(method)
+    db.commit()
+    return redirect("/admin/payment-methods")
+
+
+@router.post("/payment-methods/{method_id}/delete")
+def delete_payment_method(method_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    """إلغاء تفعيل طريقة دفع.
+
+    soft delete تاني، لنفس سبب المناطق والطلب: `payment_method_id` هو
+    `ON DELETE SET NULL`، فالحذف الحقيقي هيسيب الطلبات من غير طريقة
+    دفع. مع التعطيل، الطلبات القديمة بتفضل رابطة بالطريقة ولو معطّلة،
+    والعميل بياخدMethod جديدة من القائمة النشطة بس.
+
+    **مفيش حذف حقيقي هنا** — وده مقصود: طريقة الدفع جزء من تاريخ
+    الفاتورة، زي طريقة التوصيل بالظبط.
+    """
+    method = db.get(PaymentMethod, method_id)
+    if method is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "طريقة الدفع غير موجودة")
+    method.is_active = False
+    db.commit()
+    return redirect("/admin/payment-methods")
 
 
 @router.get("/branches", response_class=HTMLResponse)
@@ -1113,6 +1443,8 @@ async def save_settings(
     logo: Optional[UploadFile] = File(default=None),
     banner: Optional[UploadFile] = File(default=None),
     app_icon: Optional[UploadFile] = File(default=None),
+    pwa_name: Optional[str] = Form(default=None),
+    pwa_short_name: Optional[str] = Form(default=None),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     theme = dict(THEME_DEFAULTS)
@@ -1142,6 +1474,23 @@ async def save_settings(
             "لازم تحدد وقت الفتح ووقت الإغلاق مع بعض، أو تسيب الاتنين فاضيين",
         )
 
+    # أسماء التطبيق (PWA). فاضية = نستخدم اسم المطعم زي ما كان.
+    pwa_name = (pwa_name or "").strip() or None
+    pwa_short_name = (pwa_short_name or "").strip() or None
+    if pwa_name is not None and len(pwa_name) > 160:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "اسم التطبيق طويل أوي — الحد 160 حرف",
+        )
+    if pwa_short_name is not None and len(pwa_short_name) > 12:
+        # 12 هو حد `short_name` في الـmanifest: المتصفح بيقصّ الاسم
+        # الطويل على أي حال، فنرفض بدل ما نخزّن حاجة بتتقصّ على
+        # الشاشة الرئيسية وتبقى شكلها غلط.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "الاسم المختصر للتطبيق لازم يكون 12 حرف أو أقل",
+        )
+
     settings = get_or_create_settings(db)
     settings.restaurant_name = restaurant_name
     settings.whatsapp_number = whatsapp_number
@@ -1162,5 +1511,7 @@ async def save_settings(
         settings.banner_url = await save_image(banner, UPLOADS_DIR / "banners")
     if app_icon and app_icon.filename:
         settings.app_icon_url = await save_image(app_icon, UPLOADS_DIR / "icons")
+    settings.pwa_name = pwa_name
+    settings.pwa_short_name = pwa_short_name
     db.commit()
     return redirect("/admin/settings")
