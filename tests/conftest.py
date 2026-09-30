@@ -40,14 +40,47 @@ def _resolve_test_database_url() -> str:
 
     # No TEST_DATABASE_URL: derive one from the configured DATABASE_URL by
     # swapping only the database name, so tests reuse the same credentials.
-    from app.config import settings
+    #
+    # The settings object must be rebuilt *after* DATABASE_URL points at the
+    # test database, because `app.config.settings` is a module-level singleton
+    # that reads the environment exactly once at import time. Importing it here
+    # — before the assignment below — would freeze it on the development URL,
+    # and then `alembic/env.py` would migrate the development database instead
+    # of the test one.
     from sqlalchemy.engine import make_url
 
-    derived = make_url(settings.database_url).set(database="restaurant_store_test")
+    raw = os.environ.get("DATABASE_URL")
+    if raw and "_test" in make_url(raw).database:
+        return raw
+
+    if not raw:
+        # Fall back to the .env file, read directly. Going through
+        # `app.config.settings` here would import the application settings and
+        # freeze the singleton on the development URL, which is the exact bug
+        # this branch exists to avoid.
+        raw = _read_database_url_from_env_file()
+    if not raw:
+        _refuse("could not read DATABASE_URL from the environment or .env")
+
+    derived = make_url(raw).set(database="restaurant_store_test")
     url = derived.render_as_string(hide_password=False)
     if "_test" not in url:
         _refuse("could not derive a test database URL from DATABASE_URL")
     return url
+
+
+def _read_database_url_from_env_file() -> str | None:
+    """يقرا DATABASE_URL من ملف .env من غير ما يبني إعدادات التطبيق."""
+    env_path = REPO_ROOT / ".env"
+    if not env_path.exists():
+        return None
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or not stripped.startswith("DATABASE_URL"):
+            continue
+        _, _, value = stripped.partition("=")
+        return value.strip().strip('"').strip("'") or None
+    return None
 
 
 def _safe(url: str) -> str:
@@ -98,6 +131,7 @@ def db_schema() -> None:
     from alembic import command
     from alembic.config import Config
     from sqlalchemy import create_engine, text
+    from sqlalchemy.engine import make_url
 
     engine = create_engine(_TEST_DATABASE_URL, isolation_level="AUTOCOMMIT")
     try:
@@ -106,6 +140,19 @@ def db_schema() -> None:
             conn.execute(text("CREATE SCHEMA public"))
     finally:
         engine.dispose()
+
+    # `alembic/env.py` takes its URL from the application settings singleton, so
+    # the environment has to be corrected before that module is first imported.
+    # Assert it here rather than silently migrating some other database.
+    from app.config import settings
+
+    target = make_url(settings.database_url).database
+    if target != make_url(_TEST_DATABASE_URL).database:
+        raise RuntimeError(
+            "refusing to build the schema: the application settings point at "
+            f"database {target!r} but the fixture was asked to build "
+            f"{make_url(_TEST_DATABASE_URL).database!r}"
+        )
 
     cfg = Config(str(REPO_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
@@ -208,3 +255,40 @@ def settings_snapshot():
     yield settings
     for key, value in original.items():
         setattr(settings, key, value)
+
+
+@pytest.fixture()
+def menu(db):
+    """منتج واحد متاح، عشان نقدر نبني طلب فعلي.
+
+    **في `conftest.py` مش في ملف الاختبار:** أكثر من ملف يبني طلبات
+    (`test_order_creation`, `test_push`). لو الـfixture فضل في ملف واحد،
+    الملف التاني بيفشل بـ"fixture 'menu' not found" — وده بيبان كأنه
+    خطأ في السلوك مش في التنظيم.
+    """
+    from decimal import Decimal
+
+    from app.models import Category, Product
+
+    category = Category(
+        name="أصناف",
+        slug="test-category",
+        sort_order=0,
+        is_active=True,
+    )
+    db.add(category)
+    db.flush()
+
+    product = Product(
+        category_id=category.id,
+        name="منتج تجريبي",
+        slug="test-product",
+        base_price=Decimal("50.00"),
+        unit="piece",
+        is_available=True,
+        is_active=True,
+        sort_order=0,
+    )
+    db.add(product)
+    db.commit()
+    return product

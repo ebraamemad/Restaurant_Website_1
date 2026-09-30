@@ -24,35 +24,6 @@ SAMPLE = "01012345678"
 DISPLAY = SAMPLE
 
 
-@pytest.fixture()
-def menu(db):
-    """منتج واحد متاح، عشان نقدر نبني طلب فعلي."""
-    from app.models import Category, Product
-
-    category = Category(
-        name="أصناف",
-        slug="test-category",
-        sort_order=0,
-        is_active=True,
-    )
-    db.add(category)
-    db.flush()
-
-    product = Product(
-        category_id=category.id,
-        name="منتج تجريبي",
-        slug="test-product",
-        base_price=Decimal("50.00"),
-        unit="piece",
-        is_available=True,
-        is_active=True,
-        sort_order=0,
-    )
-    db.add(product)
-    db.commit()
-    return product
-
-
 def _order_payload(customer_phone: str, product_id: int) -> dict:
     return {
         "customer_name": "عميل تجريبي",

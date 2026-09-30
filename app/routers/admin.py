@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -16,6 +17,7 @@ from sqlalchemy import distinct, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app import push
 from app.database import get_db
 from app.deps import get_current_admin, verify_admin_csrf
 from app.models import (
@@ -35,11 +37,16 @@ from app.models import (
     ProductOptionGroup,
     RestaurantSettings,
 )
+from app.order_tracking import status_label as order_tracking_status_label
 from app.ordering import ZERO, quantize_money
 from app.schemas import (
     AdminDeliveryFeeIn,
     OrderStatus,
     PaymentStatusUpdateIn,
+    PushStatusOut,
+    PushSubscriptionIn,
+    PushSubscriptionOut,
+    PushUnsubscribeIn,
     allowed_next_statuses,
     coerce_order_status,
     is_transition_allowed,
@@ -59,6 +66,7 @@ from app.utils import (
 )
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(get_current_admin), Depends(verify_admin_csrf)])
+logger = logging.getLogger(__name__)
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.globals["csrf_field"] = csrf_field
@@ -773,9 +781,126 @@ def orders_page(
     )
 
 
+# ---------------------------------------------------------------------------
+# Phase 3 — إشعارات تغيير الحالة + سجل الحالة
+# ---------------------------------------------------------------------------
+#
+# ## نفس قاعدة `public.py`
+#
+# تغيير حالة الطلب في الداتابيز **أهم** من إشعار العميل. لو العميل مش
+# مشترك، أو المزوّد واقع، أو في bug — الطلب لازم يتغيّر. عشان كده
+# الإشعار **بعد** الـcommit دايماً، والـhelpers دي بتفضل فاضية الأيدي.
+#
+# ## ليه `admin: Admin = Depends(get_current_admin)` في الـsignature
+#
+# الـrouter متعمّل عليه `dependencies=[Depends(get_current_admin)]` على
+# مستوى الراوتر كله — فالـdependency شغّالة بس مش متاحة كـparameter،
+# و`get_current_admin` **مش** بيحط نفسه في `request.state`. فإما نضيفها
+# في الـsignature (وFastAPI بيعمل cache، فمش قراءة زيادة)، أو نخزّنها
+# في `request.state` — والأولى أوضح.
+
+
+def _safe_record_status(
+    db: Session, order: Order, status_value: str, admin: Optional[Admin]
+) -> None:
+    """يسجّل سطر حالة جديد — ما بيرميش.
+
+    لو الأدمن مش معروف (مفيش `request.state.admin`)، السجل بيتسجل
+    من غير `changed_by_*`. **مش بنرمي** — مفيش داعي نقفل شاشة الأدمن
+    عشان سطر في جدول تاريخ.
+    """
+    try:
+        push.record_status_change(
+            db,
+            order,
+            status_value,
+            admin_id=admin.id if admin is not None else None,
+            admin_username=admin.username if admin is not None else None,
+        )
+    except Exception:
+        logger.exception(
+            "admin_status_history_write_failed",
+            extra={"event": "admin_status_history_write_failed", "order_id": order.id},
+        )
+        try:
+            db.rollback()
+        except Exception:
+            logger.exception("admin_status_history_rollback_failed")
+
+
+def _safe_notify_customer(db: Session, order: Order) -> None:
+    """إشعار تغيير الحالة للعميل — ما بيرميش.
+
+    **الـtracking URL:** رابط التتبّع الكامل بالـtoken **مش متاح هنا**
+    — السيرفر بيخزّن hash التوكن بس (عمداً، عشان تسريب الداتابيز ما
+    يديش روابط تتبّع). فالإشعار بيروح لصفحة السجل
+    (`/orders/history`) بدل `/track?token=...`، وهي الصفحة اللي على
+    جهاز العميل نفسه فبتقرا التوكنات من `localStorage` وبتفتح طلباته.
+
+    ده أفضل من رابط مكسور، والأمانة بتضرب عرضين: مفيش توكن في
+    الداتابيز، ومفيش رابط ينتهي بخطأ 404.
+    """
+    try:
+        if not push.is_configured():
+            return
+        subscriptions = push.subscriptions_for_order(db, order)
+        if not subscriptions:
+            return
+        summary = push.send_and_commit(
+            db,
+            subscriptions,
+            payload=push.order_status_payload(
+                order,
+                admin_status_label(order.status),
+                tracking_url="/orders/history",
+            ),
+            audience=push.AUDIENCE_CUSTOMER,
+            order_id=order.id,
+        )
+        logger.info(
+            "admin_order_status_push_sent",
+            extra={
+                "event": "admin_order_status_push_sent",
+                "order_id": order.id,
+                "status": order.status,
+                "total": summary.total,
+                "sent": summary.sent,
+                "failed": summary.failed,
+                "invalid": summary.invalid,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "admin_order_status_push_failed",
+            extra={
+                "event": "admin_order_status_push_failed",
+                "order_id": order.id,
+            },
+        )
+        try:
+            db.rollback()
+        except Exception:
+            logger.exception("admin_order_status_push_rollback_failed")
+
+
+def admin_status_label(value: str) -> str:
+    """تسمية الأدمن للحالة، مع fallback للتسمية اللي للعميل.
+
+    `STATUS_LABELS` (أدمن) و`STATUS_LABELS` في `app.order_tracking.py`
+    (عميل) **مختلفين عن قصد**: "قيد الانتظار" مقابل "تم استلام الطلب".
+    الإشعار بيتبعت للعميل، فالتسمية الصح هي اللي بتظهر في `/track`.
+    بنستخدم تسمية الأدمن بس لو مفيش مقابل في تسمية العميل.
+    """
+    try:
+        return order_tracking_status_label(value)
+    except Exception:
+        return STATUS_LABELS.get(value, value)
+
+
 @router.post("/orders/{order_id}/status")
 def update_order_status(
     order_id: int,
+    admin: Admin = Depends(get_current_admin),
     status_value: OrderStatus = Form(...),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
@@ -804,7 +929,9 @@ def update_order_status(
         # صف بحالة غريبة (legacy). أي حالة جديدة مقبولة منه، عشان
         # الأدمن يقدر يصلّح صف تالف من غير تدخل يدوي في الداتابيز.
         order.status = status_value.value
+        _safe_record_status(db, order, status_value.value, admin)
         db.commit()
+        _safe_notify_customer(db, order)
         return redirect(f"/admin/orders/{order_id}")
 
     if not is_transition_allowed(current, status_value):
@@ -815,8 +942,143 @@ def update_order_status(
         )
 
     order.status = status_value.value
+    # سطر السجل **قبل** الـcommit عشان يتحفظ مع تغيير الحالة في معاملة
+    # واحدة: يا يتسجل الاثنان يا ما يتسجلش. لو فشلت الكتابة، الحالة
+    # نفسها هتتغير والنظام هيكمّل شغال (الـhelper ما بيرميش).
+    _safe_record_status(db, order, status_value.value, admin)
     db.commit()
+
+    # الإشعار **بعد** الـcommit: الإرسال بيبعت على الشبكة، ولو جا قبل
+    # الـcommit كان أي timeout هيعمل rollback لتغيير الحالة نفسه.
+    _safe_notify_customer(db, order)
     return redirect(f"/admin/orders/{order_id}")
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — اشتراك إشعارات الأدمن
+# ---------------------------------------------------------------------------
+#
+# ## ليه النداء من `/admin/api/push/*` مش `/api/push/*`
+#
+# عشان نضرب بحاجتين بنفس الطلب:
+# 1. `/api` خاصة للعميل ومحميجة برمز التتبّع بس. مسار الأدمن محمي
+#    بجلسة الأدمن + CSRF. خلط الاتنين معناه endpoint بيبقى محمي
+#    بإيهما في حالة سكربت.
+# 2. `verify_admin_csrf` على مستوى الراوتر: أي `POST` من `/admin/*`
+#    لازم يكون عنده CSRF token. لو الـsubscribe اتنادى بـ`fetch` من
+#    صفحة الأدمن بدون ما نبعته، الـrequest هيترفض بـ403 — وده بالظبط
+#    اللي عايزينه.
+#
+# **ليه `admin_id` مطلوب في كل اشتراك:** طلب واحد ممكن يبقى مفتوح
+# من 3 موظفين. كل واحد فيهم عايز إشعار على جهازه. لو اشتركنا
+# بendpoint واحد من غير `admin_id`، تغيير حالة في موبايل أي حد بيوصل
+# للأدمن ده. `endpoint` مفتاح فريد، flog = آخر تسجيل يكسب.
+#
+# **Mobile بدون VAPID:** موبايل iOS/Android بيشتغل push من غير VAPID،
+# لكن **الويب** محتاجه. زرار الأدمن بيختفي لو `enabled = false`.
+
+
+def _admin_push_out(admin: Admin, *, created: bool) -> PushSubscriptionOut:
+    return PushSubscriptionOut(
+        subscribed=True,
+        created=created,
+        public_key=push.public_key(),
+        enabled=True,
+    )
+
+
+@router.get("/api/push/public-key")
+def admin_push_public_key() -> dict:
+    """نفس `/api/push/public-key` — النسخة الأدمن.
+
+    نفس الدالة بالظبط بالتصميم: المفتاح عام، ومفيش سبب نخفيه عن
+    الأدمن (هو أصلاً بيشوف كل حاجة). الغرق في نسخة الأدمن إنه
+    بياخد CSRF تلقائياً على أي `POST` لاحق.
+    """
+    return {"public_key": push.public_key(), "enabled": push.is_configured()}
+
+
+@router.get("/api/push/status", response_model=PushStatusOut)
+def admin_push_status(
+    admin: Admin = Depends(get_current_admin), db: Session = Depends(get_db)
+) -> PushStatusOut:
+    """هل جهاز الأدمن ده مشترك في إشعارات الطلبات الجديدة؟
+
+    `subscribed` بيتحسب من اشتراكات **هذا الأدمن** مش كل الأدمن. لو
+    كل الأدمن مشترك، مينفعش نخفي الزرار من اللي لسه ما اشتركش
+    ويظهر له رسالة "مفعّل" وهي مش مفعّلة على جهازه.
+    """
+    subscribed = bool(push.subscriptions_for_admin(db, admin.id))
+    return PushStatusOut(
+        supported=push.is_configured(),
+        # زي ما في `public`: المتصفح هو اللي بيعرف الإذن الحقيقي.
+        permission="default",
+        subscribed=subscribed,
+        public_key=push.public_key(),
+        server_enabled=push.is_configured(),
+    )
+
+
+@router.post("/api/push/subscribe", response_model=PushSubscriptionOut)
+def admin_push_subscribe(
+    payload: PushSubscriptionIn,
+    request: Request,
+    admin: Admin = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+) -> PushSubscriptionOut:
+    """اشتراك جهاز الأدمن في "طلب جديد".
+
+    **idempotent** على نفس الـendpoint: فتح اللوحة مرتين أو reload
+    بعد Ctrl+F5 مايعملشش صف جديد.
+
+    **تسجيل نفس الجهاز من حسابين:** الـendpoint فريد عالمياً. لو
+    موظف اشترك من جهازه، ثم موظف تاني فتح نفس اللاب على نفس
+    الجهاز، السجل بيتنقل للأخير (`admin_id` بيتحدّث). ده سلوك مقصود:
+    الجهاز نفسه، والمستخدم الفعلي هو اللي قاعد قدامه دلوقتي.
+    """
+    if not push.is_configured():
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "الإشعارات غير متاحة حالياً"
+        )
+
+    existing = push.find_subscription(db, payload.endpoint)
+    push.register_subscription(
+        db,
+        endpoint=payload.endpoint,
+        p256dh=payload.p256dh,
+        auth=payload.auth,
+        customer_id=None,
+        admin_id=admin.id,
+        user_agent=request.headers.get("user-agent", "")[:400] or None,
+        device=payload.device,
+    )
+    db.commit()
+    return _admin_push_out(admin, created=existing is None)
+
+
+@router.post("/api/push/unsubscribe", response_model=dict)
+def admin_push_unsubscribe(
+    payload: PushUnsubscribeIn,
+    admin: Admin = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """إلغاء اشتراك الأدمن.
+
+    **بيتحقق إن الاشتراك ده للأدمن ده:** `/admin` كله محمي
+    بجلسة، بس زميل ممكن يكون مشترك على نفس الـLAN — والـendpoint لو
+    حد بعت endpoint زميله من غير ما يبقى زميله، من غير الفحص ده
+    هنلغي إشعارات حد تاني.
+    """
+    subscription = push.find_subscription(db, payload.endpoint)
+    if subscription is None:
+        return {"unsubscribed": False}
+    if subscription.admin_id != admin.id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "مش مسموح تلغي اشتراك حد تاني"
+        )
+    push.unsubscribe(db, payload.endpoint)
+    db.commit()
+    return {"unsubscribed": True}
 
 
 @router.get("/orders/{order_id}", response_class=HTMLResponse)

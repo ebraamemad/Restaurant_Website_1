@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import engine, get_db
 from app.logging_config import configure_logging, request_id_var
-from app.routers import admin, admin_auth, api, public
+from app.routers import admin, admin_auth, api, marketing, public
 from app.security import CSRF_COOKIE_NAME, create_csrf_token, verify_csrf_token
 
 configure_logging()
@@ -320,3 +320,4 @@ app.include_router(public.router)
 app.include_router(api.router)
 app.include_router(admin_auth.router)
 app.include_router(admin.router)
+app.include_router(marketing.router)

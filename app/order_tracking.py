@@ -33,6 +33,7 @@ from app.models import Order, OrderItem
 from app.schemas import (
     OrderItemOut,
     OrderStatus,
+    OrderStatusEventOut,
     OrderStatusStepOut,
     TrackedOrderOut,
     coerce_order_status,
@@ -140,7 +141,9 @@ def _step_reached(current: OrderStatus, step: OrderStatus) -> bool:
         return False
 
 
-def _reached_steps(order: Order) -> List[OrderStatusStepOut]:
+def _reached_steps(
+    order: Order, first_seen: Optional[dict] = None
+) -> List[OrderStatusStepOut]:
     """خطوات الـtimeline اللي الطلب وصلها.
 
     `current` بتحدد آخر خطوة، واللي قبلها كلهم `reached=True`. ده
@@ -148,16 +151,22 @@ def _reached_steps(order: Order) -> List[OrderStatusStepOut]:
     ما استناش التأكيد)، الخطوة اللي في النص بتظهر كأنها وصلت. لو
     عملنا `reached` بالظبط للخطوات السابقة بس، الشريط كان هيبان عليه
     خطوة مش مقطوعة.
+
+    **`first_seen` هو أول وقت وصلنا فيه لكل حالة** (Phase 3). من غيره
+    كان `at` فاضي لكل الخطوات غير الأولى، وصفحة التتبّع بتقول "من غير
+    وقت" steps حتى لو الطلب مت follow-up من ساعة.
     """
     current = coerce_order_status(order.status)
+    first_seen = first_seen or {}
     return [
         OrderStatusStepOut(
             status=step.value,
             label=STATUS_LABELS[step],
             reached=_step_reached(current, step),
-            # مفيش جدول timestamps للحالات، فمفيش وقت لكل خطوة. لو
-            # حبينا نضيف سجل تغييرات لاحقاً، دي نقطة التوسعة.
-            at=order.created_at if step is OrderStatus.pending else None,
+            # أول مرة وصلنا الحالة دي. لو مفيش سطر (طلب قديم مالوش
+            # سجل) نرجع لأول خطوة بس زي V1.
+            at=first_seen.get(step.value)
+            or (order.created_at if step is OrderStatus.pending else None),
         )
         for step in TIMELINE
     ]
@@ -185,15 +194,46 @@ def _items_out(order: Order) -> List[OrderItemOut]:
     ]
 
 
-def build_tracked_order(order: Order, currency: str) -> TrackedOrderOut:
+def build_tracked_order(
+    order: Order,
+    currency: str,
+    *,
+    db: Optional[Session] = None,
+) -> TrackedOrderOut:
     """يبني رد صفحة التتبّع من الـOrder.
 
     **مفيش هاتف ولا عنوان ولا بريد** في الرد، عن قصد: لو leakedوا من
     أي endpoint تاني، رمز التتبّع بيبقى بلا قيمة. العميل عارف طلبه من
     التوكن اللي معاه.
+
+    **`db` اختياري** عشان `build_tracked_order` يفضل نداءً نضيفاً
+    يستدعيه أي كود (اختبارات، سكربت) من غير session. من غير `db` بنرد
+    بـ`steps` زي V1 و`events` فاضي — والواجهة بتتحمّل ده.
     """
     current = coerce_order_status(order.status)
     customer_note = (order.notes or "").strip() or None
+
+    # سجل الحالة: قراءة واحدة بتدّي كل حاجة محتاجينها.
+    #
+    # **ليه lazy:** `order.status_history` relationship بيحتاج session
+    # شغّالة. من غير `db` مش هنجيبه أصلاً.
+    first_seen: dict = {}
+    events: List[OrderStatusEventOut] = []
+    if db is not None:
+        from app import push as push_service
+
+        first_seen = push_service.first_status_at(db, order.id)
+        events = [
+            OrderStatusEventOut(
+                status=event.status,
+                status_label=status_label(event.status),
+                at=event.changed_at,
+                by=event.changed_by_username,
+                synthetic=bool(event.synthetic),
+            )
+            # الأحدث فوق: العميل بيفتح الصفحة عايز آخر حاجة حصلت.
+            for event in push_service.status_history(db, order.id)
+        ]
 
     cancel_reason: Optional[str] = None
     if current == OrderStatus.cancelled:
@@ -213,7 +253,8 @@ def build_tracked_order(order: Order, currency: str) -> TrackedOrderOut:
         total=order.total,
         currency=currency,
         items=_items_out(order),
-        steps=_reached_steps(order),
+        steps=_reached_steps(order, first_seen),
+        events=events,
         # `call_center`: الرسوم لسه متحددةش. الرقم في `delivery_fee`
         # صفر مؤقت، والواجهة تعرض النص ده بدله.
         delivery_fee_label="الرسوم هتحدد من المطعم" if order.delivery_fee_pending else None,

@@ -8,21 +8,29 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app import push
+from app import marketing as marketing_service
 from app.database import get_db
 from app.models import (
     Category,
     Coupon,
+    Customer,
     DeliveryOption,
     DeliveryZone,
     PaymentMethod,
     Product,
     ProductOptionGroup,
+    PushNotification,
 )
-from app.order_tracking import build_tracked_order, require_order_by_token
+from app.order_tracking import (
+    build_tracked_order,
+    find_order_by_token,
+    require_order_by_token,
+)
 from app.ordering import (
     ZERO,
     calc_coupon_discount,
@@ -41,6 +49,8 @@ from app.schemas import (
     CouponValidateOut,
     DeliveryOptionOut,
     DeliveryZoneOut,
+    MarketingOptOutIn,
+    MarketingOptOutOut,
     OrderPreviewIn,
     OrderPreviewItemOut,
     OrderPreviewOut,
@@ -49,6 +59,11 @@ from app.schemas import (
     ProductOptionOut,
     ProductOut,
     OptionGroupOut,
+    PushNotificationOut,
+    PushStatusOut,
+    PushSubscriptionIn,
+    PushSubscriptionOut,
+    PushUnsubscribeIn,
     ReorderIn,
     ReorderLine,
     ReorderOut,
@@ -322,7 +337,7 @@ def track_order(token: str, db: Session = Depends(get_db)) -> TrackedOrderOut:
     256-بت، فمفيش فايدة لمحاولات تخمين.
     """
     order = require_order_by_token(db, token)
-    return build_tracked_order(order, get_settings(db).currency)
+    return build_tracked_order(order, get_settings(db).currency, db=db)
 
 
 @router.post("/orders/reorder", response_model=ReorderOut)
@@ -434,6 +449,277 @@ def reorder_order(payload: ReorderIn, db: Session = Depends(get_db)) -> ReorderO
         subtotal=quantize_money(subtotal),
         currency=settings.currency,
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — Web Push
+# ---------------------------------------------------------------------------
+#
+# ## هوية العميل بلا تسجيل دخول
+#
+# V2 مفيهاش حسابات عملاء. الـendpoint مش هوية، والرقم مش هوية (عميل
+# يقدر يكون عنده 3 موبايل). **الربط كله على رمز التتبع** — نفس الرمز
+# اللي بيحمي `/track` — واللي بيتحقق بـSHA-256 مقابل هاش مخزّن.
+#
+# النتيجة: `POST /api/push/subscribe` بـtoken صح بيسجّل الاشتراك باسم
+# صاحب الطلب. من غير token (أو token غلط) بنسجّل الاشتراك **من غير
+# `customer_id`** — وده اشتراك حيّ بس مش مربوط بحد. لما العميل يعمل
+# طلب بعدين، `POST /orders` بيربط اشتراكاته بالعميل الجديد. ده أحسن
+# من رفض التسجيل: المتصفح يطلب الإذن مبكر، والربط يتقفل مع أول طلب.
+#
+# ## ليه مفيش rate limiting
+#
+# نفس قرار `POST /orders` و`POST /orders/reorder`. الكتابة هنا
+# idempotent (upsert على endpoint فريد) وما بتقراش بيانات حد.
+
+
+def _resolve_customer_from_token(db: Session, token: Optional[str]):
+    """العميل المرتبط برمز التتبع، أو None."""
+    if not token:
+        return None
+    order = find_order_by_token(db, token)
+    if order is None:
+        return None
+    if order.customer_id is None:
+        return None
+    return db.get(Customer, order.customer_id)
+
+
+@router.get("/push/public-key")
+def push_public_key() -> dict:
+    """المفتاح العام بتاع VAPID — والمكان الوحيد اللي بيطلع منه.
+
+    **المفتاح الخاص مبيظهرش في أي endpoint.** الـfrontend بياخد
+    `public_key` ده وبيعمله `urlBase64ToUint8Array` ويحطه في
+    `applicationServerKey`.
+    """
+    return {"public_key": push.public_key(), "enabled": push.is_configured()}
+
+
+@router.get("/push/status", response_model=PushStatusOut)
+def push_status(token: Optional[str] = None, db: Session = Depends(get_db)) -> PushStatusOut:
+    """هل الإشعارات متاحة للعميل ده؟
+
+    `permission` بيرجّعه **المتصفح** في `Notification.permission` —
+    ما فيش حاجة نخمّنها. `default` = لسه ما اتسألش، `denied` = المستخدم
+    رفض، `granted` = مصرّح. الحقل هنا بيبدأ بـ`default` والـfrontend
+    بيملاّه بالقيمة الحقيقية من المتصفح.
+
+    **الرد بيخلّي الـfrontend ما يطلبش الإذن تاني:** لو `denied`،
+    مفيش نقطة نعرض زر "فعّل الإشعارات" — المستخدم رفض بالفعل، و
+    المتصفح مش هيسمع.
+    """
+    customer = _resolve_customer_from_token(db, token)
+    subscribed = False
+    if customer is not None:
+        subscribed = bool(push.subscriptions_for_customer(db, customer.id))
+
+    return PushStatusOut(
+        # `supported` بيتسأل للمتصفح نفسه في الجافاسكربت؛ الحقل هنا
+        # بيقلّل على الإعداد السيرفر.
+        supported=push.is_configured(),
+        permission="default",
+        subscribed=subscribed,
+        public_key=push.public_key(),
+        server_enabled=push.is_configured(),
+    )
+
+
+@router.post("/push/subscribe", response_model=PushSubscriptionOut)
+def push_subscribe(
+    payload: PushSubscriptionIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PushSubscriptionOut:
+    """تسجيل اشتراك جهاز.
+
+    **idempotent:** نفس الـendpoint تاني = تحديث مش صف جديد. وده
+    اللي بيمنع العميل من استلام الإشعار مرتين لو الصفحة اتفتحت
+    مرتين أو الـPWA اتفتح من أيقونة ومن المتصفح.
+
+    **من غير VAPID بيرجّع 503 مش 200 كاذب:** لو المفتاح مش متظبَط،
+    المتصفح مينفعش يسجّل أصلاً. رد `200` هنا معناه "اشتركت" وده
+    كذبة بتظهر بعدين كإشعارات مش بتيجي.
+    """
+    if not push.is_configured():
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "الإشعارات غير متاحة حالياً"
+        )
+
+    customer = _resolve_customer_from_token(db, payload.token)
+    existing = push.find_subscription(db, payload.endpoint)
+
+    subscription = push.register_subscription(
+        db,
+        endpoint=payload.endpoint,
+        p256dh=payload.p256dh,
+        auth=payload.auth,
+        customer_id=customer.id if customer else None,
+        admin_id=None,
+        user_agent=request.headers.get("user-agent", "")[:400] or None,
+        device=payload.device,
+    )
+    db.commit()
+
+    return PushSubscriptionOut(
+        subscribed=True,
+        created=existing is None,
+        public_key=push.public_key(),
+        enabled=True,
+    )
+
+
+@router.post("/push/unsubscribe", response_model=dict)
+def push_unsubscribe(payload: PushUnsubscribeIn, db: Session = Depends(get_db)) -> dict:
+    """إلغاء اشتراك.
+
+    **بيحترم الـtoken:** حد عنده token غيره مايلغيش اشتراك حد تاني.
+    الاشتراكات من غير `customer_id` (لسه ما عملش طلب) بتلغى من غير
+    token — دي أجهزة العميل نفسه.
+    """
+    subscription = push.find_subscription(db, payload.endpoint)
+    if subscription is None:
+        return {"unsubscribed": False}
+
+    if subscription.customer_id is not None:
+        customer = _resolve_customer_from_token(db, payload.token)
+        if customer is None or customer.id != subscription.customer_id:
+            #TOKEN مش صح (أو مش موجود) على اشتراك مربوط بحد — نرفض.
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, "مش مسموح تلغي اشتراك حد تاني"
+            )
+
+    push.unsubscribe(db, payload.endpoint)
+    db.commit()
+    return {"unsubscribed": True}
+
+
+@router.get("/push/notifications", response_model=List[PushNotificationOut])
+def push_notifications(
+    token: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> List[PushNotificationOut]:
+    """إشعارات العميل الأخيرة — بتظهر جوّه الموقع.
+
+    **الهدف:** لو الـservice worker مش شغّال (المتصفح ما سجّلش SW، أو
+    الإذن اتمنع)، العميل يبقى يقدر يشوف إشعاراته من صفحة التتبّع.
+    الإشعار في الـUI مش متلزم يكون وصله نظام إشعار.
+
+    **محمي بنفس الـtoken:** نفس تحقق `/track`. مفيش بيانات من غير توكن.
+    """
+    order = require_order_by_token(db, token)
+    if order.customer_id is None:
+        return []
+    rows = db.scalars(
+        select(PushNotification)
+        .where(PushNotification.order_id == order.id)
+        .order_by(PushNotification.created_at.desc(), PushNotification.id.desc())
+        .limit(limit)
+    ).all()
+    return [
+        PushNotificationOut(
+            id=row.id,
+            title=row.title,
+            body=row.body,
+            url=row.url,
+            status=row.status,
+            created_at=row.created_at,
+            order_id=row.order_id,
+        )
+        for row in rows
+    ]
+
+
+@router.get("/marketing/opt-out", response_model=MarketingOptOutOut)
+def marketing_opt_out_status(
+    token: str,
+    db: Session = Depends(get_db),
+) -> MarketingOptOutOut:
+    """هل العميل ده رافض العروض؟ — عشان الـUI يظهّر الزرار صح من الأول.
+
+    نفس توكن التتبّع. **نفس الرسالة للتوكن الغلط** بتاعة `/track`:
+    "الطلب مش موجود أو الرابط غير صحيح" — مفيش لznzen نمنع فيها
+    حد يجرب توكنات. لو قولنا "الطلب موجود بس التوكن غلط"، ده يفيد
+    المهاجم إنه دلوقتي في نطاق طلبات حقيقية.
+
+    طلب من غير `customer_id` (physically-deleted customer) بيرجع
+    `opt_out=False` بدل 404: مفيش حاجة تتغير، والـUI يتعامل.
+    """
+    order = require_order_by_token(db, token)
+    if order.customer_id is None:
+        return MarketingOptOutOut(opt_out=False, opted_out=False)
+    customer = db.get(Customer, order.customer_id)
+    if customer is None:
+        return MarketingOptOutOut(opt_out=False, opted_out=False)
+    return MarketingOptOutOut(
+        opt_out=bool(customer.marketing_opt_out),
+        opt_out_at=customer.marketing_opt_out_at,
+        opted_out=bool(customer.marketing_opt_out),
+    )
+
+
+@router.post("/marketing/opt-out", response_model=MarketingOptOutOut)
+def set_marketing_opt_out(
+    payload: MarketingOptOutIn,
+    db: Session = Depends(get_db),
+) -> MarketingOptOutOut:
+    """غيّر موافقة العميل على العروض.
+
+    **ليه POST مش DELETE:** العميل ممكن يغيّر رأيه. "لا ترسل لي عروض" و
+    "أنا موافق تاني" نفس الـresource، بس الحالة بتتبدّل.
+
+    **ليه مش بيسأل login:** العملاء مفيملهمش حسابات. التوكن هو إثبات
+    الملكية. وده بالظبط نفس ثقة `/track`.
+
+    **ليه مفيش CSRF:** الـendpoint آمن بطبيعته — اللي بيعرف التوكن
+    بس هو (أو حدا سرقه). CSRF بيحمي من "موقع تاني يخلي المتصفح يعمل
+    طلب باسمك"، بس المتصفح مش هيبعت التوكن لحد. لو تزوّد تسجيل دخول
+    للعملاء بعدين، لازم تضيف CSRF هنا.
+
+    **الـtransactional مش بيتأثر:** `marketing_opt_out` بيتقري في
+    `app.segments` بس. `app.push` بيبعت إشعارات حالة الطلب من غير ما
+    يفلتر على الموافقة — وده الصح قانونياً: رفض العروض مش رفض
+    إشعار إن طلبك في الطريق.
+    """
+    order = require_order_by_token(db, payload.token)
+    if order.customer_id is None:
+        # طلب من غير عميل (أو عميل محذوف). نفس 404 بتاع `/track`.
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "الطلب مش موجود أو الرابط غير صحيح",
+        )
+    customer = db.get(Customer, order.customer_id)
+    if customer is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "الطلب مش موجود أو الرابط غير صحيح",
+        )
+    # `payload.opt_out` معناها نفسها هي `marketing_opt_out` — نفس الحقل
+    # بيرجع في `MarketingOptOutOut`. الـ`not` هنا كان بيقلب الطلب كله:
+    # العميل بيقول "لستقبل" (`opt_out=True`) والكود بينفّذ
+    # `set_marketing_opt_out(..., False)`، فمحدش بيقدر يرفض العروض.
+    marketing_service.set_marketing_opt_out(db, customer, payload.opt_out)
+    return MarketingOptOutOut(
+        opt_out=bool(customer.marketing_opt_out),
+        opt_out_at=customer.marketing_opt_out_at,
+        opted_out=bool(customer.marketing_opt_out),
+    )
+
+
+@router.get("/push/config")
+def push_config() -> dict:
+    """إعدادات الإرسال العامة — حجم الـpayload والمسار.
+
+    `#` (`url`) بيتقفل على **نفس الأصل**: `url` بيروح للمتصفح وهو
+    بيفتحه في نافذة. `javascript:` أو `data:` في `url` معناه تنفيذ
+    كود. بنتحقق server-side.
+    """
+    return {
+        "max_body_length": 200,
+        "max_title_length": 120,
+        "ttl": push.MAX_TTL_SECONDS,
+    }
 
 
 @router.get("/payment-methods", response_model=List[PaymentMethodOut])

@@ -1,0 +1,169 @@
+{% extends "admin/base.html" %}
+{% block content %}
+
+{# ===== إنشاء حملة ===== #}
+{# الصفحة دي **مش بتبعت**. بتكتب وتحفظ كـ`draft`، والإرسال خطوة
+   تانية مقصودة. الفصل ده بيدّي الأدمن فرصة تقرأ الرسالة تاني. #}
+<div class="flex flex-wrap items-center justify-between gap-3">
+  <h1 class="text-xl font-extrabold sm:text-2xl">حملة جديدة</h1>
+  <a href="/admin/marketing/campaigns" class="text-sm font-bold text-emerald-700 hover:underline">رجوع للحملات</a>
+</div>
+
+{% if error %}
+<div class="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-800">
+  {{ error_messages.get(error, 'حصلت مشكلة. جرّب تاني.') }}
+</div>
+{% endif %}
+
+<form method="post" action="/admin/marketing/campaigns" class="mt-4 grid gap-4 sm:grid-cols-2">
+  {{ csrf_field(request) }}
+
+  <div class="sm:col-span-2 rounded-2xl border border-slate-200 bg-white p-4">
+    <h2 class="font-extrabold">الجمهور</h2>
+    <div class="mt-3 grid gap-3 sm:grid-cols-2">
+      <label class="block">
+        <span class="text-xs font-bold text-slate-600">نوع الجمهور</span>
+        <select name="audience_type" id="audience-type" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+          <option value="all">كل العملاء</option>
+          <option value="segment">شريحة</option>
+          <option value="imported">عملاء مستوردين</option>
+        </select>
+      </label>
+      <label class="block" id="segment-field" style="display:none">
+        <span class="text-xs font-bold text-slate-600">الشريحة</span>
+        <select name="segment_key" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" disabled>
+          {% for seg in segments() %}
+          <option value="{{ seg.key }}">{{ seg.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="block">
+        <span class="text-xs font-bold text-slate-600">القناة</span>
+        <select name="channel" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+          <option value="push">Push (إشعارات)</option>
+          {# موجودة في الموديل بس التنفيذ في مرحلة لاحقة. معطّلة عشان
+             الأدمن مايحفظش حملة مش هتتبعت. #}
+          <option value="whatsapp" disabled>WhatsApp — قريباً</option>
+          <option value="both" disabled>Push + WhatsApp — قريباً</option>
+        </select>
+      </label>
+    </div>
+
+    {# العتبات بتتخزّن مع الحملة في `audience_params`، فالإرسال
+       بيبقى على نفس الجمهور اللي شافته في المعاينة. #}
+    <div class="mt-3 grid gap-3 sm:grid-cols-2">
+      <label class="block">
+        <span class="text-xs font-bold text-slate-600">نشط لو طلب في آخر (يوم)</span>
+        <input type="number" name="recently_active_days" min="1" max="365" value="30"
+               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+      </label>
+      <label class="block">
+        <span class="text-xs font-bold text-slate-600">خامل لو من غير طلب (يوم)</span>
+        <input type="number" name="inactive_days" min="1" max="365" value="90"
+               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+      </label>
+      <label class="block">
+        <span class="text-xs font-bold text-slate-600">حد الإنفاق العالي (جنيه)</span>
+        <input type="number" name="high_spending_minimum" min="0" step="0.01" value="200"
+               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+      </label>
+    </div>
+    <p class="mt-2 text-xs text-slate-500">
+      <a href="/admin/marketing" class="font-bold text-emerald-700 hover:underline">عاين الجمهور الأول</a>
+      — أحسن من إنك تبعت بالرقم الخطأ.
+    </p>
+  </div>
+
+  <div class="sm:col-span-2 rounded-2xl border border-slate-200 bg-white p-4">
+    <h2 class="font-extrabold">الرسالة</h2>
+    <div class="mt-3 grid gap-3">
+      <label class="block">
+        <span class="text-xs font-bold text-slate-600">اسم الحملة (لكلّمتك أنت)</span>
+        <input type="text" name="name" required maxlength="120"
+               placeholder="عرض الجمعة"
+               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+      </label>
+      <label class="block">
+        <span class="text-xs font-bold text-slate-600">العنوان (اللي العميل يشوفه)</span>
+        <input type="text" name="title" required maxlength="160"
+               placeholder="خصم 20% على الكل"
+               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+      </label>
+      <label class="block">
+        <span class="text-xs font-bold text-slate-600">نص الرسالة</span>
+        <textarea name="message" required maxlength="1000" rows="3"
+                  placeholder="عرض الجمعة انتهى — خصم 20% على كل الأصناف لحد المغرب."
+                  class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></textarea>
+      </label>
+    </div>
+  </div>
+
+  <div class="sm:col-span-2 rounded-2xl border border-slate-200 bg-white p-4">
+    <h2 class="font-extrabold">الوجهة</h2>
+    <div class="mt-3 grid gap-3 sm:grid-cols-2">
+      <label class="block">
+        <span class="text-xs font-bold text-slate-600">رابط لما يدوس (اختياري)</span>
+        <input type="text" name="link_url" maxlength="600" placeholder="/menu"
+               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" dir="ltr">
+        <span class="mt-1 block text-xs text-slate-500">
+          مسار داخلي زي <code dir="ltr">/menu</code> أو رابط <code dir="ltr">https</code>.
+        </span>
+      </label>
+      <label class="block">
+        <span class="text-xs font-bold text-slate-600">صورة الإشعار (اختياري)</span>
+        <input type="text" name="image_url" maxlength="600" placeholder="/static/promo.jpg"
+               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" dir="ltr">
+        <span class="mt-1 block text-xs text-slate-500">
+          نفس القواعد. المسارات اللي بتبقى `<code dir="ltr">javascript:</code>`
+          بتترفض قبل ما تتخزن.
+        </span>
+      </label>
+    </div>
+  </div>
+
+  <div class="sm:col-span-2 rounded-2xl border border-slate-200 bg-white p-4">
+    <h2 class="font-extrabold">التوقيت</h2>
+    <label class="mt-3 block">
+      <span class="text-xs font-bold text-slate-600">جدولة (اختياري — سيبه فاضي للإرسال فوراً)</span>
+      <input type="datetime-local" name="scheduled_at"
+             class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" dir="ltr">
+      <span class="mt-1 block text-xs text-slate-500">
+        بتوقيت السيرفر. الحملة بتتبعت أول ما حد يفتح صفحة الحملات بعد الوقت ده.
+      </span>
+    </label>
+  </div>
+
+  <div class="sm:col-span-2 flex flex-wrap gap-2">
+    <button type="submit"
+            class="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800">
+      احفظ (مش هيتبعت لسه)
+    </button>
+    <a href="/admin/marketing/campaigns"
+       class="rounded-full border border-slate-300 px-5 py-2.5 text-sm font-bold transition hover:bg-slate-50">
+      إلغاء
+    </a>
+  </div>
+</form>
+
+<script>
+(function () {
+  var typeField = document.getElementById('audience-type');
+  var segmentField = document.getElementById('segment-field');
+  if (!typeField || !segmentField) return;
+
+  function sync() {
+    var isSegment = typeField.value === 'segment';
+    segmentField.style.display = isSegment ? '' : 'none';
+    // `disabled` كمان مش بس مخفي: الحقل المعطّل مش بيتبعت مع
+    // الـform، فالـbackend بيفتكر إن `segment_key` فاضي وده الصح
+    // لما يكون الجمهور "الكل".
+    var select = segmentField.querySelector('select');
+    if (select) select.disabled = !isSegment;
+  }
+
+  typeField.addEventListener('change', sync);
+  sync();
+})();
+</script>
+
+{% endblock %}

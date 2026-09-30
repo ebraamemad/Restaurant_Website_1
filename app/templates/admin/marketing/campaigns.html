@@ -1,0 +1,122 @@
+{% extends "admin/base.html" %}
+{% block content %}
+
+{# ===== قائمة الحملات ===== #}
+<div class="flex flex-wrap items-center justify-between gap-3">
+  <h1 class="text-xl font-extrabold sm:text-2xl">الحملات</h1>
+  <a href="/admin/marketing/campaigns/new"
+     class="rounded-full bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700">
+    حملة جديدة
+  </a>
+</div>
+
+{# ===== tick كسول ===== #}
+{# `run_due_campaigns` بيتنادى لما الأدمن يفتح الصفحة دي. لو فيه
+   حملة مجدولة وقتها جه، بتتشغّل دلوقتي. بنقوله بالصراحة عشان ما
+   يتفاجأش إن الأرقام بيتغيّروا لمّا فتح صفحة. #}
+{% if ran %}
+<div class="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+  اشتغلت {{ ran|length }} حملة مجدولة كان وقتها جه:
+  {% for c in ran %}<strong>{{ c.name }}</strong>{% if not loop.last %}،{% endif %}{% endfor %}
+</div>
+{% endif %}
+
+{% if error %}
+<div class="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-800">
+  {{ error_messages.get(error, 'حصلت مشكلة.') }}
+</div>
+{% endif %}
+
+{# ===== الفلاتر ===== #}
+<form method="get" action="/admin/marketing/campaigns" class="mt-4 flex flex-wrap gap-2">
+  <input type="search" name="q" value="{{ filters.q or '' }}" placeholder="اسم أو نص"
+         class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+  <select name="status" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+    <option value="">كل الحالات</option>
+    {% for key, label in status_labels.items() %}
+    <option value="{{ key }}" {% if filters.status == key %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <select name="channel" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+    <option value="">كل القنوات</option>
+    {% for key, label in channel_labels.items() %}
+    <option value="{{ key }}" {% if filters.channel == key %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white">فلتر</button>
+  <a href="/admin/marketing/campaigns" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold">مسح</a>
+</form>
+
+{# ===== الجدول ===== #}
+<div class="mt-4 overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+  {% if campaigns %}
+  <table class="w-full min-w-[46rem] text-sm">
+    <thead class="border-b border-slate-200 bg-slate-50 text-right text-xs font-bold text-slate-600">
+      <tr>
+        <th class="px-3 py-2.5">الحملة</th>
+        <th class="px-3 py-2.5">الجمهور</th>
+        <th class="px-3 py-2.5">القناة</th>
+        <th class="px-3 py-2.5">الحالة</th>
+        <th class="px-3 py-2.5">النتيجة</th>
+        <th class="px-3 py-2.5">التاريخ</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-100">
+      {% for c in campaigns %}
+      <tr class="transition hover:bg-slate-50">
+        <td class="px-3 py-2.5">
+          <a href="/admin/marketing/campaigns/{{ c.id }}" class="font-bold text-emerald-700 hover:underline">
+            {{ c.name }}
+          </a>
+          <div class="text-xs text-slate-500">{{ c.title }}</div>
+        </td>
+        <td class="px-3 py-2.5 text-slate-600">
+          {{ audience_label(c.audience_type) or c.audience_type }}
+        </td>
+        <td class="px-3 py-2.5 text-slate-600">{{ channel_label(c.channel) or c.channel }}</td>
+        <td class="px-3 py-2.5">
+          {# ألوان الحالة عشان العين تلقى المحتاج انتباه: المجدولة
+             بتنتظر، والجزئية محتاجة مراجعة. #}
+          {% if c.status == 'completed' %}
+            <span class="rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800">تمت</span>
+          {% elif c.status in ('partial', 'partially_completed') %}
+            <span class="rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-800">نجحت جزئياً</span>
+          {% elif c.status == 'failed' %}
+            <span class="rounded-full bg-red-100 px-2 py-1 text-xs font-bold text-red-800">فشلت</span>
+          {% elif c.status == 'cancelled' %}
+            <span class="rounded-full bg-slate-200 px-2 py-1 text-xs font-bold text-slate-700">ملغاة</span>
+          {% elif c.status == 'sending' %}
+            <span class="rounded-full bg-blue-100 px-2 py-1 text-xs font-bold text-blue-800">بتتبعت</span>
+          {% elif c.status == 'scheduled' %}
+            <span class="rounded-full bg-violet-100 px-2 py-1 text-xs font-bold text-violet-800">مجدولة</span>
+          {% else %}
+            <span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">مسودة</span>
+          {% endif %}
+        </td>
+        <td class="px-3 py-2.5 text-slate-600">
+          {# "—" بدل 0% لو مفيش محاولة. 0% صادقة بس بتلخبط. #}
+          {% if c.total_recipients %}
+            <span class="font-bold text-slate-800">{{ c.sent_count }}</span>
+            <span class="text-xs text-slate-500">/ {{ c.total_recipients }}</span>
+            {% if c.failed_count %}
+              <div class="text-xs text-red-600">{{ c.failed_count }} فشل</div>
+            {% endif %}
+          {% else %}
+            <span class="text-slate-400">—</span>
+          {% endif %}
+        </td>
+        <td class="px-3 py-2.5 text-xs text-slate-500">{{ c.created_at.strftime('%Y-%m-%d') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="p-6 text-center text-sm text-slate-500">
+    مفيش حملات. <a href="/admin/marketing/campaigns/new" class="font-bold text-emerald-700 hover:underline">اعمل أول واحدة</a>
+  </p>
+  {% endif %}
+</div>
+
+<p class="mt-3 text-xs text-slate-500">{{ total }} حملة</p>
+
+{% endblock %}

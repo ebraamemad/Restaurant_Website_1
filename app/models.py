@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import List, Optional
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -34,6 +35,12 @@ class Admin(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Phase 3 — إشعارات "طلب جديد". كل حساب أدمن يقدر يعمل اشتراك Web Push
+    # خاص بيه على جهازه (ديك توب، موبايل، PWA مثبّت).
+    push_subscriptions: Mapped[List["PushSubscription"]] = relationship(
+        back_populates="admin", cascade="all, delete-orphan"
+    )
 
 
 class AdminLoginAttempt(Base):
@@ -282,6 +289,12 @@ class Order(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     items: Mapped[List["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
+    # Phase 3 — سجل تغيّرات الحالة. أول سطر (pending) بيتكتب مع إنشاء الطلب،
+    # وبعده سطر لكل تغيير في اللوحة. `cascade` + `delete-orphan` مقصود:
+    # السجل بتاع طلب مش موجود من غير الطلب.
+    status_history: Mapped[List["OrderStatusHistory"]] = relationship(
+        back_populates="order", cascade="all, delete-orphan", order_by="OrderStatusHistory.changed_at"
+    )
     branch: Mapped["Branch"] = relationship(back_populates="orders")
     delivery_option: Mapped[Optional["DeliveryOption"]] = relationship(back_populates="orders")
     delivery_zone: Mapped[Optional["DeliveryZone"]] = relationship(back_populates="orders")
@@ -403,18 +416,372 @@ class RestaurantSettings(Base):
 
 
 class Customer(Base):
+    """عميل — قد يكون جاي من طلب، أو من استيراد CSV.
+
+    ## `phone` مفتاح التوحيد
+
+    العمود ده `unique`. كل المسارات اللي بتكتب عميل جديد
+    (`app.ordering.create_order` للاستخدام العادي، `app.marketing_csv`
+    للاستيراد) بتمرّ على `app.utils.normalize_phone` الأول، فـ`0101…`
+    و`+20101…` و`0020101…` بتوصل لنفس الصف. ده اللي بيمنع إعداد
+   Marketing Center من تقسيم عميل واحد لثلاثة.
+
+    ## `first_order_at` / `last_order_at` بقت nullable
+
+    كانت `NOT NULL` لأن كل عميل كان بيتبق من طلب. الاستيراد بيبق
+    عميل **قبل** ما يطلب، فمفيش تاريخ طلبات ليه. الرجوع لـNOT NULL
+    كان هيعني إما إنك نكسر الاستيراد، أو إننا نخزّن تاريخ وهمي
+    (`created_at`) في عمود اسمه "أول طلب" — وده كدب بيظهر في تقرير
+    التسويق كأنه اشترى. `NULL` هنا معناه "لسه ما طلبش" وده أصدق.
+
+    ## `marketing_opt_out` مش زي إذن الإشعارات
+
+    دي موافقة على **رسائل التسويق** تحديداً. إشعارات حالة الطلب
+    (transactions) مش Promo، والمطعم ملزم يبعتاها عشان العميل يعرف
+    طلبه وصل. لو خلطنا الاتنين، العميل اللي رفض عروض هيتعطل عنه
+    إشعار "طلبك في الطريق" — وده ضرر للعميل مش حماية ليه.
+
+    منفصل كمان عن صلاحية اشتراك Web Push: الاشتراك بيقول "المتصفح
+    مستعد يستقبل"، و`marketing_opt_out` بيقول "العميل عايز promo
+    بس". ممكن عميل يكون مشترك في push وعامد من العروض.
+    """
+
     __tablename__ = "customers"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     phone: Mapped[str] = mapped_column(String(30), unique=True, index=True)
     name: Mapped[Optional[str]] = mapped_column(String(120))
-    first_order_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    last_order_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    first_order_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_order_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    # ===== Phase 4 — التسويق =====
+    # من إجا العميل ده؟ بيفرق في التقارير: عميل من طلب (`order`) عنده
+    # تاريخ إنفاق حقيقي، وعميل من استيراد (`import`) لسه معروف برقم
+    # واسم بس. ده بيبان في شاشة الاستيراد وكمان في مقاييس الحملة.
+    #
+    # `default="order"` مقصود: كل العملاء الموجودين من قبل جايين من
+    # طلبات، والـbackfill في الـmigration بيحطّ `order` لكل صف قديم.
+    source: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="order", server_default="order", index=True
+    )
+    # رفض العروض. `False` = موافق (الافتراضي). `True` = رفض صريح.
+    #
+    # **ليه `False` مش "مش معروف":** في marketing push، الرقمنة بتوصل
+    # لعميل ما طلبش حاجة مننا عمره — "مش عارف" = "ما أعرفش عايز
+    # عروض، فماشي". ويبقى صريح في تسجيل موافقته.
+    marketing_opt_out: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false", index=True
+    )
+    # وقت الرفض. `NULL` معناها لسه موافق. بنحفظه عشان نعرف نرجّع
+    # الموافقة لو العميل طلب، ونعرف إمتى طلبت (تاريخ دقيق لا لزوم له
+    # في التقرير، بس مفيد للمراجعة).
+    marketing_opt_out_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
     orders: Mapped[List["Order"]] = relationship(back_populates="customer")
     push_subscriptions: Mapped[List["PushSubscription"]] = relationship(back_populates="customer")
+    campaigns: Mapped[List["CampaignRecipient"]] = relationship(back_populates="customer")
+
+    __table_args__ = (
+        CheckConstraint("source IN ('order', 'import')", name="ck_customers_source"),
+    )
+
+
+class ContactImport(Base):
+    """دفعة استيراد جهات اتصال من CSV — الـaudit بتاع العملية.
+
+    ## ليه الـbatch مستقر ومش بيتبعت في الـURL
+
+    الاستيراد عملية من 5 خطوات (رفع → فحص → معاينة → استيراد)،
+    والصفوف thousands مينفعش تتحمل في hidden field ولا في session.
+    فبنخزّن الدفعة في الداتابيز، والمعاينة بتقرأ منها بـ`import_id`
+    عادي. ده كمان بيدي أثر: مين استورد إيه وإمتى، وحد كام سطر
+    ضاع وليه.
+    """
+
+    __tablename__ = "contact_imports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # اسم الملف الأصلي — للعرض فقط، مش بنفتحه تاني (الملف نفسه مش
+    # بيتخزّن؛ الصفوف المستخرجة هي اللي بتتخزّن).
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    # `previewed` = اترفع واتقري، `imported` = اتنفّذ، `discarded` =
+    # الأدمن ستّه. الدفعة اللي ما اتنفذتش مينفعش تتنفذ تاني — عشان
+    # ما يحصلش double import لو دوس زرار مرتين.
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="previewed", server_default="previewed", index=True
+    )
+    total_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    valid_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    invalid_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    duplicate_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    imported_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_by_admin_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("admins.id", ondelete="SET NULL"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    imported_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # سبب الرفض لو الملف كله اترفض (حجم، ترميز، نوع ملف). بيتعرض
+    # للأدمن في رسالة واضحة بدل 500.
+    error: Mapped[Optional[str]] = mapped_column(String(300))
+
+    rows: Mapped[List["ContactImportRow"]] = relationship(
+        back_populates="batch", cascade="all, delete-orphan", order_by="ContactImportRow.row_number"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('previewed', 'imported', 'discarded')",
+            name="ck_contact_imports_status",
+        ),
+    )
+
+
+class ContactImportRow(Base):
+    """سطر واحد جوه دفعة استيراد — من فضله التحقق والمعالجة.
+
+    ## ليه `raw_*` كمان
+
+    الأدمن بيشوف **اللي في الملف** جنب **اللي عدّلناه**. من غير الـraw
+    مش هعرف يفرق بين "الرقم كان غلط في الملف" و"النظام عدّله"،
+    و"السطر رجع تاني بسبب تكرار" و"السطر مكرر في الملف نفسه".
+    """
+
+    __tablename__ = "contact_import_rows"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    import_id: Mapped[int] = mapped_column(
+        ForeignKey("contact_imports.id", ondelete="CASCADE"), index=True
+    )
+    # رقم السطر في الملف (2 = بعد الـheader). للتواصل مع الأدمن.
+    row_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    raw_name: Mapped[Optional[str]] = mapped_column(String(300))
+    raw_phone: Mapped[Optional[str]] = mapped_column(String(120))
+    # بعد `normalize_phone` — الشكل الموحّد اللي بيتخزّن في `customers`.
+    normalized_phone: Mapped[Optional[str]] = mapped_column(String(30), index=True)
+    name: Mapped[Optional[str]] = mapped_column(String(120))
+    # `valid` = جاهز للاستيراد، `invalid` = مرفوض (السبب في `error`)،
+    # `duplicate` = الرقم موجود بالفعل، `imported` = اتنفذ.
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="valid", server_default="valid", index=True
+    )
+    # سبب الرفض بالعربي — بيتعرض للأدمن في جدول المعاينة.
+    error: Mapped[Optional[str]] = mapped_column(String(300))
+    # العميل الموجود مسبقًا لو السطر طلع مكرر. بيخلّي "مكرر" informative
+    # مش مجرد "skip".
+    existing_customer_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("customers.id", ondelete="SET NULL")
+    )
+    # بيتحطّ وقت الاستيراد بس — عشان نعرف مين اتضاف بالظبط.
+    customer_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("customers.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    batch: Mapped[ContactImport] = relationship(back_populates="rows")
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('valid', 'invalid', 'duplicate', 'imported')",
+            name="ck_contact_import_rows_status",
+        ),
+        Index("ix_contact_import_rows_import_status", "import_id", "status"),
+    )
+
+
+class Campaign(Base):
+    """حملة تسويقية — الـheader بتاع الرسالة اللي بتتبعت.
+
+    ## فصل `image_url` عن `link_url`
+
+    `image_url` = صورة الأندوك (اللي بتظهر جوه الإشعار على الموبايل).
+    `link_url` = الصفحة اللي الدوس على الإشعار بيفتحها.
+
+    الاتنين `Optional` لأن من حق الأدمن يبعت نص بس. والوجهة بتتخزن
+    **بعد** تحقق `app.schemas.MarketingLinkUrl` — مفيش `javascript:`
+    ولا `data:` ولا رابط خارجي بيمرّي. (الـSW بيعمل تحقق تاني من
+    ناحية العميل: الـserver مصدق بس المتصفح هو اللي بيفتح.)
+
+    ## `audience_type` + `segment_key` مع بعض
+
+    مقصود إن `segment_key` يبقى `NULL` لما `audience_type='all'`. ده
+    بيدي شرط CHECK في الداتابيز، فالمستحيل تصنع حملة "الكل" ومعاها
+    segment متعارض، ممنوع يجي بالبرمجة. pp.marketing.resolve_audience بيفرض
+    نفس القاعدة من ناحية الكود.
+
+    ## الحالات
+
+    ```
+    draft ──send──> sending ──> completed | partially_completed | failed
+      │                 │
+      │                 └──cancel──> cancelled
+      └──schedule──> scheduled ──(جرى الوقت)──> sending
+    ```
+
+    `partially_completed` مش cosmetic: معناها "بعتنا لبعض"، وده
+    قرار تشغيلي بيحتاج يبقى باين في التقرير.
+    """
+
+    __tablename__ = "campaigns"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # الاسم الداخلي بتاع الأدمن ("عرض الجمعة").
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    # العنوان اللي بيظهر في الإشعار. منفصل عن `name` عشان الاسم
+    # الداخلي ممكن يبقى "حملة تجريبية" والعنوان "خصم 20% 🎉".
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    image_url: Mapped[Optional[str]] = mapped_column(String(600))
+    link_url: Mapped[Optional[str]] = mapped_column(String(600))
+    # `all` | `segment` | `imported`
+    audience_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="all", server_default="all", index=True
+    )
+    # مفتاح من `app.segments.SEGMENTS`. NULL إلا لو `audience_type='segment'`.
+    segment_key: Mapped[Optional[str]] = mapped_column(String(40), index=True)
+    # **معااملات الجمهور وقت الإنشاء** — `AudienceParams` متسلسلة كـJSON.
+    #
+    # ليه دي موجودة: `segments` بتبني الجمهور من معاملات
+    # (`recently_active_days`, `inactive_days`, `high_spending_minimum`).
+    # لو ما خزّناشها، `send_campaign` هيبني `AudienceParams()` من
+    # الـdefaults — والأدمن شاف في المعاينة "آخر 7 أيام" (180 عميل)
+    # وبعد ما ضغط إرسال طلع له "آخر 30 يوم" (520 عميل). ده أسوأ
+    # نوع من الغلط: صامت، والأرقام في التقرير صح بس بتطابق شريحة غلط.
+    #
+    # فالمعاينة والإرسال بيبقىوا **نفس** الـparams بالظبط، من غير
+    # احتمالات.
+    #
+    # `default={}` مش `None`: الحملة القديمة (قبل الـmigration) مالها
+    # قيمة، و`parse_params()` بيرجّع الـdefaults لو مفيش. فالسطر
+    # القديم بيشتغل زي ما كان بالظبط.
+    audience_params: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+    # `push` | `whatsapp` | `both`. `whatsapp`/`both` بيتسجّلوا بس في
+    # المرحلة دي — التنفيذ في Phase 5. مش بنسلوكم كأنهم اتبعتوا.
+    channel: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="push", server_default="push", index=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="draft", server_default="draft", index=True
+    )
+    # `index=False` مع الـIndex المركّب في `__table_args__`: المجدول
+    # بيسأل `status = 'scheduled' AND scheduled_at <= now` مرتّب
+    # بـ`scheduled_at`، وفهرس العمودين هو اللي يخدم الاستعلام ده.
+    # فهرس `scheduled_at` لوحده كان هيخلّي Postgres يرتّب كل
+    # المجدولات عشان يطلّع القليلة المستحقة.
+    scheduled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    cancel_reason: Mapped[Optional[str]] = mapped_column(String(300))
+    # العدادات دي **نتايج مش نوايا**: بتتحسب من صفوف `campaign_recipients`
+    # وقت الإرسال، مش من تقدير قبل الإرسال. عشان كده التقرير بيقول
+    # "اتبعت 412" مش "كان المفروض 412".
+    total_recipients: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    sent_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    invalid_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_by_admin_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("admins.id", ondelete="SET NULL"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+    recipients: Mapped[List["CampaignRecipient"]] = relationship(
+        back_populates="campaign", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        CheckConstraint("channel IN ('push', 'whatsapp', 'both')", name="ck_campaigns_channel"),
+        CheckConstraint(
+            "status IN ('draft', 'scheduled', 'sending', 'completed', "
+            "'partially_completed', 'cancelled', 'failed')",
+            name="ck_campaigns_status",
+        ),
+        CheckConstraint(
+            "audience_type IN ('all', 'segment', 'imported')",
+            name="ck_campaigns_audience_type",
+        ),
+        # "الكل" ومعاها segment = بيانات متناقضة. القيد بيفصلها بدل ما
+        # نسيب اللوجيك يكتشفها بعدين.
+        CheckConstraint(
+            "(audience_type = 'segment' AND segment_key IS NOT NULL) OR "
+            "(audience_type <> 'segment' AND segment_key IS NULL)",
+            name="ck_campaigns_audience_segment",
+        ),
+        # استعلام المجدول بالظبط: `status='scheduled' AND scheduled_at <= now`
+        # مرتّبة. الفهرس المركّب هو اللي بيخلّي ده scan مش sort.
+        Index("ix_campaigns_status_scheduled", "status", "scheduled_at"),
+    )
+
+
+class CampaignRecipient(Base):
+    """سطر واحد في كل حملة: عميل واحد في حملة واحدة.
+
+    ## ليه جدول استقبال منفصل عن الأرقام على الحملة
+
+    التلات أرقام على `Campaign` (total/sent/failed) **محسوبة** من
+    التلات أرقام على Campaign (total/sent/failed) **محسوبة** من
+    الجدول ده، ومش من غيره:
+    - "اشتراك باط من المزوّد" ← نقدر نعيد المحاولة مرة تانية.
+    - "مين العميل ده فعلاً" → لو نفس العميل عنده جهازين، اتبعت
+      مرتين، سطرين. ده صح: جهازين = رسالتين علىDevices تانية.
+    - تقرير "did not deliver" بيحتاج سطر لكل جهاز.
+
+    ## `status='skipped'` موجود ليش
+
+    الاشتراك ممكن يبقى مش `active` بين لحظة الـresolve ولحظة
+    الإرسال (العميل رجع في الإذن، أو المزوّد بطل الـendpoint). ده مش
+    فشل — العميل ما طلبش نوصّله. بنفرّق بين "مش دلوقتي" و"حاولنا
+    وفشلنا" عشان التقرير يبقى أمين.
+    """
+
+    __tablename__ = "campaign_recipients"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), index=True
+    )
+    customer_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("customers.id", ondelete="SET NULL"), index=True
+    )
+    subscription_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("push_subscriptions.id", ondelete="SET NULL")
+    )
+    # لقطة من وقت الحساب، عشان التقرير يبقى مقروء من غير ما نعمل join.
+    customer_name: Mapped[Optional[str]] = mapped_column(String(120))
+    customer_phone: Mapped[Optional[str]] = mapped_column(String(30))
+    # `pending` → `sent` | `failed` | `skipped` | `invalid`
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending", index=True
+    )
+    # سبب `failed`/`skipped` — نكوته مختصر، مش traceback.
+    error: Mapped[Optional[str]] = mapped_column(String(300))
+    # كود ردة المزوّد (201/410/500)، لو رجع.
+    response_code: Mapped[Optional[int]] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    campaign: Mapped[Campaign] = relationship(back_populates="recipients")
+    customer: Mapped[Optional["Customer"]] = relationship(back_populates="campaigns")
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'sent', 'failed', 'skipped', 'invalid')",
+            name="ck_campaign_recipients_status",
+        ),
+        Index("ix_campaign_recipients_campaign_status", "campaign_id", "status"),
+    )
+
 
 
 class ProductOptionGroup(Base):
@@ -555,18 +922,20 @@ class DeliveryZone(Base):
 
 
 class PushSubscription(Base):
-    """اشتراك Web Push لجهاز/متصفح عميل — أساس المرحلة الجاية فقط."""
+    """اشتراك Web Push لجهاز/متصفح — عميل أو أدمن.
+
+    ## ليه `endpoint` فريد
+
+    نفس المتصفح بيرسل نفس الـendpoint في كل تسجيل. لو سمحنا بتكراره،
+    هنجمع صفوف بتاعت نفس الجهاز ونبعت له الإشعار **مرتين**. عشان كده
+    التسجيل بيعمل `upsert` بـON CONFLICT على الفهرس الفريد بدل INSERT.
+    """
 
     __tablename__ = "push_subscriptions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     # `unique=True, index=True` = فهرس فريد واحد اسمه
-    # `ix_push_subscriptions_endpoint`. الـendpoint هو مفتاح device
-    # فعليًا: نفس المتصفح بيرسل نفس الـendpoint في كل تسجيل، ولو سمحنا
-    # بتكراره هنجمع صفوف بتاعت نفس الجهاز ونبعت له الإشعار مرتين.
-    # الفهرس الفريد بيفرض `upsert` بـON CONFLICT — واليوم مفيش
-    # endpoints أصلاً، بس لازم الـconstraint يبقى موجود من دلوقتي قبل
-    # ما الكود يتكتب.
+    # `ix_push_subscriptions_endpoint`.
     endpoint: Mapped[str] = mapped_column(String(600), nullable=False, unique=True, index=True)
     p256dh: Mapped[str] = mapped_column(String(300), nullable=False)
     auth: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -575,6 +944,28 @@ class PushSubscription(Base):
     customer_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("customers.id", ondelete="SET NULL"), index=True
     )
+    # Phase 3 — مين صاحب الاشتراك. `admin_id` و`customer_id` بيت واحد في
+    # نفس الوقت مش اتنين: اشتراك الأدمن مربوط بالحساب، واشتراك العميل
+    # بالرقم. `customer_id` بيبقى NULL لاشتراك الأدمن والعكس.
+    admin_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("admins.id", ondelete="CASCADE"), index=True
+    )
+
+    # حالة الاشتراك نفسه. `active` هو الطبيعي. لما المزوّد يقولي إن الـendpoint
+    # مبقاش صالح (404/410 من FCM أو Mozilla) بنحطّه `invalid` بدل ما نمسح
+    # الصف: مسح الصف بيمسح تاريخ الإرسال المرتبط بيه، و`invalid` بيقول
+    # "جرّبنا ده واشتغلش" من غير ما نكسر الـaudit.
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="active", server_default="active", index=True
+    )
+    # آخر مرة المزوّد رفض الـendpoint. بيتحطّ مرة واحدة وقت ما يتعلّم، مش
+    # كل مرة — عشى جدول السجلات ميكبرش مع كل محاولة فاشلة.
+    invalid_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    failure_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    last_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -583,9 +974,141 @@ class PushSubscription(Base):
     )
 
     customer: Mapped[Optional["Customer"]] = relationship(back_populates="push_subscriptions")
+    admin: Mapped[Optional["Admin"]] = relationship(back_populates="push_subscriptions")
     order_links: Mapped[List["OrderPushSubscription"]] = relationship(
         back_populates="subscription", cascade="all, delete-orphan"
     )
+    notifications: Mapped[List["PushNotification"]] = relationship(
+        back_populates="subscription", cascade="all, delete-orphan"
+    )
+
+    # الفهارس المركّبة دي هي اللي الاستعلامات الحقيقية بتشغّل عليها:
+    # "كل اشتراكات العميل النشطة" (`app.push.subscriptions_for_customer`)
+    # و"كل اشتراكات الأدمن النشطة" (`active_admin_subscriptions`). فهرس
+    # العمود لوحده بيفلتر في الذاكرة بعد ما يجيب كل الصفوف — ده فارق
+    # حقيقي لما يبقى عند العميل 5 أجهزة مسجّلة.
+    #
+    # مصرّح بيها بالاسم المطابق للـmigration عشان `alembic check` يقفل.
+    __table_args__ = (
+        Index("ix_push_subscriptions_customer_status", "customer_id", "status"),
+        Index("ix_push_subscriptions_admin_status", "admin_id", "status"),
+    )
+
+
+class OrderStatusHistory(Base):
+    """سجل تغيّرات حالة الطلب — Phase 3.
+
+    ## ليه الجدول ده
+
+    `orders.status` هي **الحالة الحالية** بس. من غير سجل، page التتبّع
+    بتقدر تقول "الطلب دلوقتي preparing" بس مش **إمتى** اتغيّرت كل حالة —
+    و`PHASE1`/`PHASE2`iyyinDeBoth said this explicitly: "مفيش جدول
+    timestamps للحالات... دي نقطة التوسعة."
+
+    السجل ده هو نقطة التوسعة دي. بيفيد في:
+    - صفحة التتبّع: كل خطوة يظهر وقت فعلي مش وقت الطلب.
+    - الـanalytics: زمن التحضير الحقيقي بدل تقدير.
+    - دعم: العميل بيحتج "الطلب اتأكد الساعة كام".
+
+    # الصف الأول
+
+    الطلبات الموجودة قبل Phase 3 مالها سطر `pending` واحد وقت الإنشاء،
+    من الـbackfill في الـmigration. ده **مُختلق**: احنا عارفين إن الطلب
+    كان pending، ومش عارفين إمتى بالظبط. الحقل `synthetic` بيميز
+    السطور دي عن السطور الحقيقية اللي اتسجلت بعد كده.
+    """
+
+    __tablename__ = "order_status_history"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    # وقت التغيير. `server_default=now()` عشان الصف يتسجل من الداتابيز
+    # مش من الكود — ساعت السيرفر هي المرجع في كل اللوجات.
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    # مين غيّر الحالة. NULL = العميل أو نظام تلقائي (إنشاء الطلب).
+    # مينفعش نخليها NOT NULL: إنشاء الطلب مفيش أدمن بيشغّله.
+    #
+    # `index=False` مع `Index(...)` صريح في `__table_args__` — الفهرس
+    # الحقيقي اسمه `ix_order_status_history_admin_id` (اللي migration
+    # بيخلّقه). لو سبنا `index=True`، SQLAlchemy هيولّد
+    # `ix_order_status_history_changed_by_admin_id` و`alembic check`
+    # هيشوف فارق: فهرس الموديل مش موجود، وفهرس الداتابيز زائد.
+    changed_by_admin_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("admins.id", ondelete="SET NULL"), index=False
+    )
+    # سطر تليفون الأدمن وقت التغيير. denormalized عن قصد: لو الحساب
+    # اتمسح بعدين، السجل يفضل يقول مين اللي كان شغال وقتها.
+    changed_by_username: Mapped[Optional[str]] = mapped_column(String(80))
+    note: Mapped[Optional[str]] = mapped_column(String(300))
+    # True = صف مُختلق من الـbackfill، مش تغيّر حقيقي اتسجل.
+    synthetic: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
+    order: Mapped["Order"] = relationship(back_populates="status_history")
+    changed_by_admin: Mapped[Optional["Admin"]] = relationship(foreign_keys=[changed_by_admin_id])
+
+    # الفهارس مصرّح بيها بالاسم المطابق للـmigration. قراءة خط
+    # حالة طلب واحد زمنياً = index scan على `(order_id, changed_at)`،
+    # مش sort على كل السطور. والاثنين دول اللي بيستعملهم
+    # `app.order_tracking` فعلياً.
+    __table_args__ = (
+        Index("ix_order_status_history_admin_id", "changed_by_admin_id"),
+        Index("ix_order_status_history_order_changed", "order_id", "changed_at"),
+    )
+
+
+class PushNotification(Base):
+    """سجل إشعار اتبعت — Phase 3.
+
+    ## الفرق بين السجل ده وبين الاشتراك
+
+    `push_subscriptions` بيقول **مين مشترك**. `push_notifications` بيقول
+    **إيه اللي اتبعت لمين، ونت إيه**. ده اللي بيخلّي:
+    - العميل يشوف إشعاراته الأخيرة جوّه الموقع من غير ما يكون الـSW شغّال.
+    - الأدمن يعرف طلب اتسجل عليه إشعار أصلاً ولا لأ (مفيد في support).
+    - احنا نعرف هل القناة شغّالة أصلاً ولا المزوّد بيرفض.
+
+    ## ليه مش بنخزّن الـpayload كامل
+
+    بنخزّن `title` و`body` و`url` كأعمدة. الـpayload الموقّع نفسه مش
+    بنخزّنه — هو بياناتmomentary، والسجل ده بيبقى أطول من عمر الإشعار.
+    """
+
+    __tablename__ = "push_notifications"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subscription_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("push_subscriptions.id", ondelete="CASCADE"), index=True
+    )
+    order_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"), index=True
+    )
+    # audience بيفرّق بين إشعار الأدمن وإشعار العميل. `order_status` و
+    # `new_order` قيمتين بس في المرحلة دي.
+    audience: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    body: Mapped[str] = mapped_column(String(300), nullable=False)
+    url: Mapped[Optional[str]] = mapped_column(String(300))
+    # `sent` / `failed`. `sent` = المزوّد رد 200-299. `failed` = رد خطأ
+    # أو استثناء. `skipped` = اشتراك مش active اتخطّى من غير محاولة.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="sent", index=True)
+    # رقم HTTP اللي رجع من المزوّد، أو None لو مفيش رد. مفيش stack trace:
+    # الـlog هو المكان الصح للتفاصيل.
+    response_code: Mapped[Optional[int]] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+    subscription: Mapped[Optional["PushSubscription"]] = relationship(
+        back_populates="notifications"
+    )
+    order: Mapped[Optional["Order"]] = relationship(foreign_keys=[order_id])
 
 
 class OrderPushSubscription(Base):

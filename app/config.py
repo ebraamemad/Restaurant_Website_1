@@ -1,9 +1,12 @@
 '''
 Settings configuration with production safety validation.
 '''
+import base64
 import logging
 from functools import lru_cache
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -40,6 +43,32 @@ class Settings(BaseSettings):
     admin_login_window_minutes: int = 15
     # سقف لعدد المسجلات القديمة لنفس الـkey (تنضيف وقائي)
     admin_login_max_rows_per_key: int = 50
+
+    # Phase 3 — Web Push (VAPID)
+    # المفتاح الخاص **لازم يفضل على السيرفر**. `get_public_vapid_key` هي
+    # الدالة الوحيدة المسموح لها تقرأ `vapid_private_key`، وهي بترجّع
+    # المفتاح العام بس. أي endpoint بيرجّع للعميل بيرجّع العام بس — وده
+    # اللي بيتحوّل لـ`applicationServerKey` في المتصفح.
+    vapid_subject: str = "mailto:admin@example.com"
+    vapid_private_key: str | None = None
+    vapid_public_key: str | None = None
+    # مهلة الإرسال. الـpush بيبعت طلب شبكة، والطلب ده جاي من مسار طلب
+    # حقيقي أو من تغيير حالة في اللوحة، فمفيش داعي إنه يعلّق المسار كله لو
+    # المزوّد بطيء. القيمة الافتراضية 10 ثواني.
+    push_send_timeout_seconds: int = 10
+    # نطاقات مزوّدي الـpush المسموح تسجيلهم. **قائمة أمان مش تفضيل.**
+    # الـendpoint بيتخزّن من المتصفح، وبعدين السيرفر بيبعت له POST. لو
+    # قبلنا أي نطاق، الـendpoint بيبقى **SSRF**: حد بيسجّل
+    # `https://169.254.169.254/latest/meta-data/` أو `https://localhost:8000/admin`
+    # والسيرفر يعمل لهم طلب من جوه الشبكة الداخلية — والرد بيرجع في اللوج.
+    # القيم دي نطاقات المزوّدين الحقيقيين بس. لو عندك web-push
+    # self-hosted، ضيف نطاقه هنا (عن طريق `.env`، مش بالكود).
+    push_allowed_endpoint_hosts: str = (
+        "fcm.googleapis.com,"
+        "updates.push.services.mozilla.com,"
+        "web.push.apple.com,"
+        "push.services.mozilla.com"
+    )
 
     # Phase 0 — سلوك الكوكيز في الإنتاج
     # لو True، التطبيق بيفشل في الإقلاع في production لو الكوكيز مش secure.
@@ -112,6 +141,219 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def is_allowed_push_endpoint_host(host: str) -> bool:
+    """هل `host` من مزوّدي الـpush المسموح لهم؟
+
+    **المقارنة بتطابق النطاق بالكامل**، مش `endswith`. لو استعملنا
+    `endswith("googleapis.com")`، النطاق `evilgoogleapis.com` هيعدّي
+    — وده بالظبط اللي الـallowlist موجود عشان يمنعه. كمان
+    `attacker.com/?x=fcm.googleapis.com` مش هيمرّي لأن `urlparse`
+    بيرجّع الـhost بس من غير الـpath.
+
+    النطاق الفرعي بيمرّي: `fcm.googleapis.com` و
+    `sub.fcm.googleapis.com` —     نطاقات المزوّدين بيتمددوا، والنطاقات الخطرين بتكسر.
+    """
+    normalized = (host or "").strip().lower().rstrip(".")
+    if not normalized:
+        return False
+    allowed = settings.push_allowed_endpoint_hosts
+    for candidate in allowed.split(","):
+        candidate = candidate.strip().lower().rstrip(".")
+        if not candidate:
+            continue
+        if normalized == candidate or normalized.endswith("." + candidate):
+            return True
+    return False
+
+
+# ============================================================
+# VAPID — Phase 3 (Web Push)
+# ============================================================
+#
+# مفاتيح VAPID في `.env` لازم تكون **base64url** وده نفس الإخراج اللي
+# `web-push` بتولّده (المفتاح العام = 65 بايت: `04` + نقطة P-256 غير
+# مضغوطة، من غير padding). `pywebpush` بيشتغل بـPEM، فبنحوّل هنا مرة واحدة
+# بدل ما نخزّن PEM في `.env` ونخلط صيغتين.
+#
+# **ليه التحويل في كود التطبيق مش في `.env`:** لو حُفظ المفتاح كـPEM في
+# `.env`، أي حد بيفتح الملف هيشوف OpenSSH-style header، والنسخ واللصق بيتكسر
+# بسهولة. base64url سطر واحد مفيش فيه سطور تتلخبط.
+#
+# `vapid_public_key` في `.env` مضاعف 32 بايت لـX (سطح المنحنى) وده
+# المطلوب من الـbrowser — مش النقطة الكاملة.
+
+# بايت واحد بيفرق: النقطة غير المضغوطة بتبدأ بـ0x04. المتصفح بيستقبل
+# الـpublic key من الـ`applicationServerKey` وبيلفّها بنفسه، فلازم نديه
+# 65 بايت (مع الـprefix) مش 64.
+_UNCOMPRESSED_POINT_PREFIX = b"\x04"
+
+
+def _b64url_decode(value: str) -> bytes:
+    """فك ترميز base64url مع/من الـpadding."""
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+def _b64url_encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
+def normalize_vapid_private_key(value: str) -> str:
+    """بيحوّل المفتاح الخاص لصيغة PEM اللي `pywebpush` بيقراها.
+
+    ## الصيغ المقبولة
+
+    `-` **32 بايت raw** (اللي `webpush.generateVapidKeys()` في Node
+      بتطلعه). ده الشكل الشائع في التوثيق.
+    - **DER/PKCS8 base64url** (اللي `cryptography` بتطلعه). ده اللي
+      أغلب أدوات سطر الأوامر بتعمله.
+
+    قبل كنا بنقبل 32 بايت بس، وده كان معناه: أي حد عمل المفاتيح بـ
+    `openssl` أو أي Python snippet لقي إشعاراته مش شغّالة، والسبب
+    المبين في اللوج كان مش واضح (`32 بايت مطلوب` وهو شايف مفتاح
+    48 بايت في الـENV).
+
+    - **PEM جاهز**: نمرّره زي ما هو — وده تفسير "المفتاح الخاص
+      متظبَط أصلاً" حرفياً.
+    """
+    stripped = value.strip()
+    if "BEGIN" in stripped and "PRIVATE KEY" in stripped:
+        return stripped
+
+    raw = _b64url_decode(stripped)
+
+    if len(raw) == 32:
+        # Node web-push style: الرقم السري نفسه كـscalar.
+        key = ec.derive_private_key(int.from_bytes(raw, "big"), ec.SECP256R1())
+    else:
+        # DER/PKCS8. لو مش DER، الخطأ بيبان هنا بالرسالة الصح.
+        try:
+            key = serialization.load_der_private_key(raw, password=None)
+        except Exception as exc:
+            raise ValueError(
+                f"مفتاح VAPID الخاص لازم يكون 32 بايت raw أو DER/PKCS8، "
+                f"فعلي={len(raw)} بايت: {exc}"
+            ) from exc
+        if not isinstance(key, ec.EllipticCurvePrivateKey):
+            raise ValueError("مفتاح VAPID الخاص لازم يكون مفتاح EC")
+
+    return key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode("ascii")
+
+
+def normalize_vapid_public_key(value: str) -> str:
+    """بيحوّل public key لـbase64url بالشكل اللي المتصفح بياخده.
+
+    بيقبل الصيغتين اللي في التداول: 64 بايت (نقطة P-256 من غير الـprefix)
+    و65 بايت (مع `0x04` في الأول). لو 65، الـprefix بيتشال لأننا بنرجّعه
+    لـ`.env`-style value ونضيفه تاني عند التسليم للمتصفح.
+    """
+    stripped = value.strip()
+    if stripped.startswith("-----BEGIN PUBLIC KEY"):
+        loaded = serialization.load_pem_public_key(stripped.encode("ascii"))
+        raw = loaded.public_bytes(
+            serialization.Encoding.X962,
+            serialization.PublicFormat.UncompressedPoint,
+        )
+        if raw.startswith(_UNCOMPRESSED_POINT_PREFIX):
+            raw = raw[1:]
+        return _b64url_encode(raw)
+    raw = _b64url_decode(stripped)
+    if raw.startswith(_UNCOMPRESSED_POINT_PREFIX):
+        raw = raw[1:]
+    if len(raw) != 64:
+        raise ValueError(f"مفتاح VAPID العام لازم يكون 64 بايت، فعلي={len(raw)}")
+    return _b64url_encode(raw)
+
+
+@lru_cache(maxsize=1)
+def get_vapid_private_pem() -> str | None:
+    """مفتاح VAPID الخاص بصيغة PEM، أو None لو الإرسال مش مُفعّل.
+
+    **الدالة دي داخلية.** أي حاجة غير `app.push` المفروض ما تستدعيهاش.
+    """
+    raw = settings.vapid_private_key
+    if not raw or not raw.strip():
+        return None
+    try:
+        return normalize_vapid_private_key(raw)
+    except Exception:
+        logger.exception("vapid_private_key_is_invalid")
+        return None
+
+
+@lru_cache(maxsize=1)
+def get_vapid_public_key() -> str | None:
+    """مفتاح VAPID **العام** في صيغة `.env` (نقطة 64 بايت، بلا prefix).
+
+    دي القيمة اللي بتتخزّن في `VAPID_PUBLIC_KEY`. **مش** هي اللي
+    بتروح للمتصفح — للـbrowser شوف `get_vapid_public_key_browser`.
+    """
+    raw = settings.vapid_public_key
+    if raw and raw.strip():
+        try:
+            return normalize_vapid_public_key(raw)
+        except Exception:
+            logger.exception("vapid_public_key_is_invalid")
+            return None
+    # لو الـpublic key مش متظبَط: نستخرجه من الخاص. أحسن من إنك تقعد
+    # تشتغل من غير إشعارات، وبيفضل صحيح لأنه جاي من نفس الـprivate key.
+    try:
+        pem = get_vapid_private_pem()
+        if not pem:
+            return None
+        loaded = serialization.load_pem_private_key(pem.encode("ascii"), password=None)
+        raw_point = loaded.public_key().public_bytes(
+            serialization.Encoding.X962,
+            serialization.PublicFormat.UncompressedPoint,
+        )
+        return _b64url_encode(raw_point[1:])
+    except Exception:
+        logger.exception("vapid_public_key_derivation_failed")
+        return None
+
+
+@lru_cache(maxsize=1)
+def get_vapid_public_key_browser() -> str | None:
+    """المفتاح العام بالشكل اللي **`pushManager.subscribe()` بياخده**.
+
+    ## ليه الدالة دي موجودة أصلاً
+
+    `applicationServerKey` بيبقى **النقطة غير المضغوطة كاملة = 65 بايت**:
+    `0x04` + X (32) + Y (32). الـ`VAPID_PUBLIC_KEY` في `.env` بيتخزّن
+    64 بايت (X+Y بس) عشان مينفعش نقارنه مع أي حاجة ونفسه في كل الأدوات
+    اللي بتطبعه.
+
+    من غير الـ`0x04`، `subscribe()` بيرمي `InvalidAccessError` في Chrome
+    و Firefox، والعَرَض: المستخدم يضغط "فعّل"، يقرأ الإذن granted، وبعدين
+    **مفيش إشعار ولا رسالة خطأ**. أصعب نوع bug في الميزة دي كلها.
+    """
+    normalized = get_vapid_public_key()
+    if not normalized:
+        return None
+    raw = _b64url_decode(normalized)
+    if not raw.startswith(_UNCOMPRESSED_POINT_PREFIX):
+        raw = _UNCOMPRESSED_POINT_PREFIX + raw
+    return _b64url_encode(raw)
+
+
+def push_is_configured() -> bool:
+    """هل الإرسال ممكن أصلاً؟ بيتسأل في كل UI بيتحكم في زر الإشعارات.
+
+    **`vapid_subject` جزء من الشرط** مش رفاهية: RFC 8292 بتقول الـ`sub`
+    claim مطلوب، وFCM/Mozilla بيرفضوا الطلب كله من غيره بـ401. من غير
+    الفحص ده كان كل زر الإشعارات هيقول "مفعّل" وكل إرسال هيفشل بصمت
+    في اللوج.
+    """
+    subject = (settings.vapid_subject or "").strip()
+    if not subject:
+        return False
+    return bool(get_vapid_private_pem() and get_vapid_public_key())
 
 
 settings = get_settings()

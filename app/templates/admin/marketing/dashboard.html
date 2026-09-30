@@ -1,0 +1,104 @@
+{% extends "admin/base.html" %}
+{% block content %}
+
+{# ===== لوحة التسويق ===== #}
+<div class="flex flex-wrap items-center justify-between gap-3">
+  <div>
+    <h1 class="text-xl font-extrabold sm:text-2xl">مركز التسويق</h1>
+    <p class="mt-1 text-sm text-slate-500">
+      شوف مين عمل إيه، واختار الشريحة، وبعدين ابعت.
+    </p>
+  </div>
+  <div class="flex flex-wrap gap-2">
+    <a href="/admin/marketing/campaigns/new"
+       class="rounded-full bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700">
+      حملة جديدة
+    </a>
+    <a href="/admin/marketing/import"
+       class="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-bold transition hover:bg-slate-50">
+      استيراد عملاء
+    </a>
+  </div>
+</div>
+
+{# ===== شرائح ===== #}
+{# `breakdown` فيه كل شريحة وعدّادها — حتى صفر. الصفر مهم: الأدمن
+   يشوف "عملاء عالي الإنفاق: 0" فيفهم إن عنده قاعدة عملاء صغيرة،
+   مش إن في bug. #}
+<div class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+  {% for seg, count in breakdown %}
+  <form method="post" action="/admin/marketing/preview" class="contents">
+    {{ csrf_field(request) }}
+    <input type="hidden" name="audience_type" value="segment">
+    <input type="hidden" name="segment_key" value="{{ seg.key }}">
+    <input type="hidden" name="channel" value="push">
+    <input type="hidden" name="recently_active_days" value="{{ params.recently_active_days }}">
+    <input type="hidden" name="inactive_days" value="{{ params.inactive_days }}">
+    <input type="hidden" name="high_spending_minimum" value="{{ params.high_spending_minimum }}">
+    <button type="submit"
+            class="rounded-2xl border border-slate-200 bg-white p-4 text-right transition hover:border-emerald-300 hover:shadow-sm">
+      <div class="text-2xl font-extrabold text-slate-900">{{ count }}</div>
+      <div class="mt-0.5 text-sm font-bold text-slate-700">{{ seg.label }}</div>
+      <div class="mt-1 text-xs leading-5 text-slate-500">{{ seg.description }}</div>
+      {# الشريحة الفاضية ماتنتفعش للضغط — الأزرار الميتة بتضيّع وقت
+         الأدمن والصفحة بتطلع مكسورة. #}
+      {% if count == 0 %}
+        <div class="mt-2 text-xs font-bold text-amber-600">مفيش عملاء في الشريحة دي</div>
+      {% endif %}
+    </button>
+  </form>
+  {% endfor %}
+</div>
+
+{# ===== الإحصاء العام ===== #}
+{# الأرقام دي **قبل** فلترة الاشتراكات: "كل العملاء" مش "اللي عندهم
+   إشعار". الفرق مهم — الأول بتخطيط، التاني بعملية بعت. #}
+<div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+  <div class="rounded-2xl border border-slate-200 bg-white p-4">
+    <div class="text-xs font-bold text-slate-500">إجمالي العملاء</div>
+    <div class="mt-1 text-2xl font-extrabold">{{ total.total }}</div>
+  </div>
+  <div class="rounded-2xl border border-slate-200 bg-white p-4">
+    <div class="text-xs font-bold text-slate-500">رافضين العروض</div>
+    <div class="mt-1 text-2xl font-extrabold text-amber-600">{{ total.opted_out }}</div>
+    <div class="mt-1 text-xs text-slate-500">دايماً مستثنيين من أي حملة</div>
+  </div>
+  <div class="rounded-2xl border border-slate-200 bg-white p-4">
+    <div class="text-xs font-bold text-slate-500">عندهم إشعار شغّال</div>
+    <div class="mt-1 text-2xl font-extrabold text-emerald-600">{{ total.recipients }}</div>
+    <div class="mt-1 text-xs text-slate-500">اللي هيتبعت لهم فعلاً</div>
+  </div>
+  <div class="rounded-2xl border border-slate-200 bg-white p-4">
+    <div class="text-xs font-bold text-slate-500">من غير إشعار</div>
+    <div class="mt-1 text-2xl font-extrabold text-slate-700">{{ total.no_subscription }}</div>
+    <div class="mt-1 text-xs text-slate-500">محتاجين يفعّلوا الإشعارات</div>
+  </div>
+</div>
+
+{# ===== آخر الحملات ===== #}
+<div class="mt-6 rounded-2xl border border-slate-200 bg-white p-4">
+  <div class="flex items-center justify-between">
+    <h2 class="font-extrabold">آخر الحملات</h2>
+    <a href="/admin/marketing/campaigns" class="text-sm font-bold text-emerald-700 hover:underline">كل الحملات</a>
+  </div>
+  {% if recent %}
+  <div class="mt-3 divide-y divide-slate-100">
+    {% for c in recent %}
+    <a href="/admin/marketing/campaigns/{{ c.id }}"
+       class="flex flex-wrap items-center justify-between gap-2 py-2.5 transition hover:bg-slate-50">
+      <div>
+        <div class="font-bold">{{ c.name }}</div>
+        <div class="text-xs text-slate-500">{{ c.title }}</div>
+      </div>
+      <div class="text-xs text-slate-500">
+        {{ status_label(c.status) or c.status }} · {{ c.sent_count }} مبعوت
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="mt-3 text-sm text-slate-500">مفيش حملات لسه. ابدأ بأول حملة من فوق.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

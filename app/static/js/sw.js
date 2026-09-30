@@ -116,3 +116,161 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
+// ============================================================
+// الإشعارات — Phase 3
+// ============================================================
+//
+// ## ليه الـpayload بيتعامل معاه كـ"untrusted"
+//
+// السيرفر هو اللي بيبعت، بس مينفعش نعامل `event.data.json()` كـobject
+// مضمون. المزوّد (FCM/Mozilla) بيعدّيها، لكن أي bug في السيرفر أو
+// اشتراك على endpoint حد تاني معناه `data.url` ممكن يبقى أي حاجة.
+//
+// **القاعدة: `url` لازم يكون path داخلي يبدأ بـ`/`.** لو مش كذلك
+// بنتجاه ونروّح العميل لصفحة السجل. `javascript:` و`data:` في
+// notificationclick = تنفيذ كود. مش بنفتحهم أبداً.
+//
+// ## ليه `showNotification` بـ`self.registration` مش متغير
+//
+// `self.registration` متاح في كل الـSW scope. لو `showNotification`
+// رمت (permission اتسحب)، بنبلع الخطأ: المتصفح بيلغّي الإشعارات لو
+// رجعنا Tried نعملها تاني.
+
+const PUSH_FALLBACK_URL = '/orders/history';
+const MAX_NOTIFICATION_TITLE = 120;
+const MAX_NOTIFICATION_BODY = 200;
+
+/** Path داخلي آمن، أو null لو الـpayload مفيهوش واحد صالح. */
+function safeInternalUrl(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 500) {
+    return null;
+  }
+  // المطلق ممنوع: `//evil.com` و`https://evil.com` الاتنين برّوا الموقع.
+  // `javascript:` و`data:` مش paths أصلاً.
+  if (!value.startsWith('/') || value.startsWith('//')) {
+    return null;
+  }
+  return value;
+}
+
+function clampText(value, max) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  // السطر الجديد بيخلي العنوان يبدو مكسور في بعض الأجهزة. بنتحوله
+  // لمسافة بدل ما نخلي الـSW يفشل.
+  return value.replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function readPayload(event) {
+  if (!event.data) {
+    return null;
+  }
+  try {
+    const parsed = event.data.json();
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * هل الإشعار ده لسه مهم؟
+ *
+ * ترقيم تصاعدي: لو وصل إشعار بنفس الرقم تاني، ده تكرار من المزوّد
+ * (أو إعادة إرسال بعد إعادة تسجيل الـSW) — بنسقطه. ده بيمنع
+ * "طلب جديد" مكرر 3 مرات لو الشبكة رجعت بـretry.
+ */
+function notificationTag(payload) {
+  const orderId = payload && payload.order_id;
+  const status = payload && payload.status;
+  if (orderId && status) {
+    return `order-${orderId}-${status}`;
+  }
+  if (orderId) {
+    return `order-${orderId}`;
+  }
+  return null;
+}
+
+self.addEventListener('push', (event) => {
+  // `push` من غير `data` = "جرّب الاتصال". المتصفح بيبعت الرسالة دي
+  // لما الـpermission يتأكّد في أول اشتراك. بنعمل notification بنص
+  // ثابت بدل ما نتجاهلها، عشان المستخدم يشوف إن الإعداد اشتغل.
+  if (!event.data) {
+    event.waitUntil(
+      self.registration.showNotification('إشعارات مفعّلة', {
+        body: 'هنوصللك تحديثات طلبك هنا.',
+        icon: '/static/icons/icon-192.png',
+        badge: '/static/icons/icon-192.png',
+        tag: 'push-test',
+        data: { url: PUSH_FALLBACK_URL },
+      })
+    );
+    return;
+  }
+
+  const payload = readPayload(event);
+  if (!payload) {
+    // Payload مش JSON: مفيش حاجة نعرف نعرضها. بنتجاه ونصمت — أحسن
+    // من `showNotification` بنص فاضي يبان زي bug للمستخدم.
+    return;
+  }
+
+  const url = safeInternalUrl(payload.url) || PUSH_FALLBACK_URL;
+  const title = clampText(payload.title, MAX_NOTIFICATION_TITLE) || 'طلبك اتحدّث';
+  const tag = notificationTag(payload);
+
+  const options = {
+    body: clampText(payload.body, MAX_NOTIFICATION_BODY),
+    // `tag` بيخلي المتصفح **يستبدل** الإشعار القديم بنفس الـtag بدل ما
+    // يكوّم. طلب واحد بيتحدّث 5 مرات = إشعار واحد بيتحدّث، مش 5.
+    ...(tag ? { tag: tag } : {}),
+    icon: '/static/icons/icon-192.png',
+    badge: '/static/icons/icon-192.png',
+    // `renotify: true` بيخلي الصوت/الاهتزاز يتصلوا من غير ما نخلق
+    // إشعار مكرر — بس بيتطلب `tag` موجود. من غير tag بصمت.
+    ...(tag ? { renotify: true } : {}),
+    requireInteraction: false,
+    data: { url: url, order_id: payload.order_id || null },
+  };
+
+  event.waitUntil(
+    self.registration
+      .showNotification(title, options)
+      // إشعار رفضه المتصفح (permission اتسحب، أو quota) — مفيش
+      // إعادة محاولة تفيد. بنسجّم وبس.
+      .catch((error) => console.warn('[sw] showNotification failed:', error))
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  const target = safeInternalUrl(event.notification.data && event.notification.data.url)
+    || PUSH_FALLBACK_URL;
+
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: 'window', includeUncontrolled: true })
+      .then((clientList) => {
+        // لو فيه نافذة مفتوحة على نفس الأصل: بنجيبها قدام ومفيش
+        // تبويب جديد. ده اللي المستخدم بيتوقعه لما يدوس على إشعار.
+        //
+        // **مش بنعمل `client.focus()` على أي نافذة:** لو المستخدم عنده
+        // 5 تبويبات، ده هيجيبه التبويب الأول حتى لو كان صفحة منيو.
+        // بنفلتر على نفس المسار بس.
+        for (const client of clientList) {
+          if (new URL(client.url).pathname === new URL(target, self.location.origin).pathname) {
+            return client.focus();
+          }
+        }
+        if (self.clients.openWindow) {
+          return self.clients.openWindow(target);
+        }
+        return undefined;
+      })
+      .catch((error) => console.warn('[sw] notificationclick failed:', error))
+  );
+});

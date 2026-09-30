@@ -26,6 +26,7 @@
       <div class="flex flex-wrap gap-1 text-xs font-semibold sm:gap-2 sm:text-sm">
           <a href="/admin/orders" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/orders') %}bg-slate-100{% endif %}">الطلبات</a>
           <a href="/admin/customers" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/customers') %}bg-slate-100{% endif %}">العملاء</a>
+          <a href="/admin/marketing" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/marketing') %}bg-slate-100{% endif %}">التسويق</a>
           <a href="/admin/delivery-options" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/delivery-options') %}bg-slate-100{% endif %}">التوصيل والاستلام</a>
           <a href="/admin/payment-methods" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/payment-methods') %}bg-slate-100{% endif %}">طرق الدفع</a>
           <a href="/admin/branches" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/branches') %}bg-slate-100{% endif %}">الفروع</a>
@@ -100,6 +101,19 @@
       });
     }
   });
+
+  // تأكيد قبل الإجراءات الصعبة: إرسال حملة، إلغاؤها، استيراد عملاء.
+  //
+  // **دي راحة البال مش أمان.** الحماية الحقيقية على الـserver:
+  // `send_campaign` بيرفض أي حالة غير `scheduled`/`draft`، فدوس
+  // زرار مرتين بيبعت مرة واحدة بس. الـconfirm بيمنع الدوسة
+  // المتعمّدة، مش السريعة.
+  document.addEventListener('submit', function(e) {
+    var message = e.target.getAttribute && e.target.getAttribute('data-confirm');
+    if (message && !window.confirm(message)) {
+      e.preventDefault();
+    }
+  }, true);
 </script>
 
 <div id="pwa-install-banner" class="fixed bottom-0 left-0 right-0 z-50 hidden flex-col items-center gap-3 bg-white p-4 shadow-[0_-4px_20px_rgba(0,0,0,0.15)]">

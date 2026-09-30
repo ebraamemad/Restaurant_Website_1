@@ -1,0 +1,152 @@
+{% extends "admin/base.html" %}
+{% block content %}
+
+{# ===== تفاصيل حملة ===== #}
+<div class="flex flex-wrap items-center justify-between gap-3">
+  <div>
+    <h1 class="text-xl font-extrabold sm:text-2xl">{{ campaign.name }}</h1>
+    <p class="mt-1 text-sm text-slate-500">{{ campaign.title }}</p>
+  </div>
+  <a href="/admin/marketing/campaigns" class="text-sm font-bold text-emerald-700 hover:underline">رجوع للحملات</a>
+</div>
+
+{% if error %}
+<div class="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-800">
+  {{ error_messages.get(error, 'حصلت مشكلة.') }}
+</div>
+{% endif %}
+
+{# ===== الرسالة ===== #}
+<div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+  <h2 class="font-extrabold">الرسالة</h2>
+  <p class="mt-2 whitespace-pre-line text-sm leading-6 text-slate-700">{{ campaign.message }}</p>
+  {% if campaign.link_url or campaign.image_url %}
+  <div class="mt-3 space-y-1 border-t border-slate-100 pt-3 text-xs text-slate-500">
+    {% if campaign.link_url %}<div dir="ltr">link: {{ campaign.link_url }}</div>{% endif %}
+    {% if campaign.image_url %}<div dir="ltr">image: {{ campaign.image_url }}</div>{% endif %}
+  </div>
+  {% endif %}
+</div>
+
+{# ===== النتيجة ===== #}
+{# العدّادات **نتايج مش نوايا**: بتتحسب من `campaign_recipients` وقت
+   الإرسال. "اتبعت 412" مش "كان المفروض 412". #}
+<div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+  <div class="rounded-2xl border border-slate-200 bg-white p-4">
+    <div class="text-xs font-bold text-slate-500">الحالة</div>
+    <div class="mt-1 text-lg font-extrabold">
+      {{ status_label(campaign.status) or campaign.status }}
+    </div>
+  </div>
+  <div class="rounded-2xl border border-slate-200 bg-white p-4">
+    <div class="text-xs font-bold text-slate-500">المحاولة</div>
+    <div class="mt-1 text-2xl font-extrabold">{{ campaign.total_recipients }}</div>
+  </div>
+  <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+    <div class="text-xs font-bold text-emerald-800">اتبعت</div>
+    <div class="mt-1 text-2xl font-extrabold text-emerald-700">{{ campaign.sent_count }}</div>
+  </div>
+  <div class="rounded-2xl border border-red-200 bg-red-50 p-4">
+    <div class="text-xs font-bold text-red-800">فشل</div>
+    <div class="mt-1 text-2xl font-extrabold text-red-700">{{ campaign.failed_count }}</div>
+  </div>
+</div>
+
+{# ===== الإرسال والإلغاء ===== #}
+<div class="mt-4 flex flex-wrap gap-2">
+  {# الزرارين مبانيين بحالة `draft`/`scheduled` بس. `send_campaign`
+     بيرفض أي حالة تانية، فحتى لو حد ضغط بإيده server بيرفض. #}
+  {% if campaign.status in ('draft', 'scheduled') %}
+  <form method="post" action="/admin/marketing/campaigns/{{ campaign.id }}/send"
+        data-confirm="متأكد؟ هيتبعت {{ campaign.total_recipients or '' }} إشعار للعميل. مفيش way ترجّع.">
+    {{ csrf_field(request) }}
+    <button type="submit"
+            class="rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700">
+      ابعت دلوقتي
+    </button>
+  </form>
+  <form method="post" action="/admin/marketing/campaigns/{{ campaign.id }}/cancel"
+        data-confirm="متأكد؟ الحملة هتترفض والعميل مش هيوصله إشعار.">
+    {{ csrf_field(request) }}
+    <button type="submit"
+            class="rounded-full border border-red-300 px-5 py-2.5 text-sm font-bold text-red-600 transition hover:bg-red-50">
+      إلغاء الحملة
+    </button>
+  </form>
+  {% else %}
+  <p class="rounded-full bg-slate-100 px-4 py-2.5 text-sm font-bold text-slate-600">
+    الحملة دي اتبعت أو اتلغت — مش هتتعدّل تاني.
+  </p>
+  {% endif %}
+</div>
+
+{# ===== تفاصيل الفشل ===== #}
+{# الفشل مش دايمًا مشكلة عندنا: مشرك WS بيقفل، browser مسح
+   الإذن. عشان كده بنوري الـerror عشان الأدمن يقدر يفرق. #}
+{% set problems = (failures or []) %}
+{% if problems %}
+<div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+  <h2 class="font-extrabold">
+    مش وصلهم ({{ breakdown.get('failed', 0) }} فشل / {{ breakdown.get('skipped', 0) }} متخطى / {{ breakdown.get('invalid', 0) }} بطل)
+  </h2>
+  <p class="mt-1 text-xs text-slate-500">
+    "متخطى" = الاشتراك مالوشش device شغّال دلوقتي. ده مش خطأ — العميل ما طلبش توصّله.
+  </p>
+  <div class="mt-3 overflow-x-auto">
+    <table class="w-full min-w-[30rem] text-sm">
+      <thead>
+        <tr class="border-b border-slate-200 text-right text-xs font-bold text-slate-500">
+          <th class="py-2">العميل</th>
+          <th class="py-2">الحالة</th>
+          <th class="py-2">السبب</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for row in problems %}
+        <tr>
+          <td class="py-2 text-slate-700">
+            {{ row.customer_name or '—' }}
+            {# لقطة من وقت الحساب، مش join — العميل ممكن يكون اتمسح. #}
+            <div class="text-xs text-slate-500" dir="ltr">{{ row.customer_phone or '—' }}</div>
+          </td>
+          <td class="py-2 text-xs text-slate-600">{{ row.status }}</td>
+          <td class="py-2 text-xs text-red-700">{{ row.error or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{# ===== المعاملات ===== #}
+{# دي بت explaining ليش الجمهور طلع بالشكل ده. من غيرها الأدمن ممكن
+   يفترض إن الـbackend غيّر حاجة. #}
+<div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+  <h2 class="font-extrabold">الجمهور</h2>
+  <div class="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+    <div>
+      <span class="text-xs font-bold text-slate-500">النوع</span>
+      <div>{{ audience_label(campaign.audience_type) or campaign.audience_type }}</div>
+    </div>
+    {% if campaign.segment_key %}
+    <div>
+      <span class="text-xs font-bold text-slate-500">الشريحة</span>
+      <div dir="ltr">{{ campaign.segment_key }}</div>
+    </div>
+    {% endif %}
+    <div>
+      <span class="text-xs font-bold text-slate-500">نشط</span>
+      <div>{{ campaign.audience_params.get('recently_active_days', 30) }} يوم</div>
+    </div>
+    <div>
+      <span class="text-xs font-bold text-slate-500">خامل</span>
+      <div>{{ campaign.audience_params.get('inactive_days', 90) }} يوم</div>
+    </div>
+  </div>
+  <p class="mt-2 text-xs text-slate-500">
+    دي نفس العتبات اللي استعملتها في المعاينة — الإ sending اتحسب على أساسها بالظبط.
+  </p>
+</div>
+
+{% endblock %}

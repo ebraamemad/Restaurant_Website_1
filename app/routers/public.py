@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -11,6 +12,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app import push
 from app.database import get_db
 from app.models import (
     Branch,
@@ -24,9 +26,13 @@ from app.models import (
     PaymentMethod,
     Product,
     ProductOptionGroup,
+    PushSubscription,
     RestaurantSettings,
 )
-from app.order_tracking import build_tracked_order, find_order_by_token
+from app.order_tracking import (
+    build_tracked_order,
+    find_order_by_token,
+)
 from app.ordering import compute_pricing, resolve_payment_method, validate_scheduled_time
 from app.schemas import (
     AddonOut,
@@ -56,6 +62,8 @@ router = APIRouter()
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.globals["theme_colors"] = parse_theme_colors
+
+logger = logging.getLogger(__name__)
 
 
 def get_settings(db: Session) -> RestaurantSettings:
@@ -200,7 +208,7 @@ def track_order_page(
         {
             "request": request,
             "token": token,
-            "order": build_tracked_order(order, restaurant_settings.currency),
+            "order": build_tracked_order(order, restaurant_settings.currency, db=db),
             "settings": restaurant_settings,
         },
     )
@@ -406,11 +414,186 @@ def product_detail(request: Request, product_slug: str, db: Session = Depends(ge
     )
 
 
+# ---------------------------------------------------------------------------
+# Phase 3 — إشعارات الطلب
+# ---------------------------------------------------------------------------
+#
+# ## ليه `_safe_*` helpers منفصلة
+#
+# قاعدة المرحلة دي: **فشل الإشعار ما يسقطش الطلب ولا تغيير الحالة.**
+# دي دوال مساندة بتبلع أي استثناء وترجّع — مش بس استثناءات `push`:
+# لو `record_status_change` أو `_link_*` رمى استثناءً، الطلب يفضل
+# محفوظ والعميل ياخد رد 200 بتاعه. الخطأ بيروح للوج مش للعميل،
+# لأن العميل مش يقدر يعمل حاجة بيه.
+#
+# **`push.send_and_commit` نفسها كمان ما بترميش** (داخلها `try/except`
+# على كل مستوى)، بس دي طبقة تانية: لو `db.execute` جواها رفض، أو
+# `select` رجّع استثناء، أو أي bug في `app.push` نفسه، الـwrapper
+# بياكله.
+#
+# # ليه SAVEPOINT مش `db.rollback()`
+#
+# `_safe_link_customer_subscriptions` و`_safe_record_status` بيشتغلوا
+# **قبل** `db.commit()` في `create_order` — يعني الطلب لسه في الـsession
+# وغير محفوظ. `db.rollback()` هنا بيرمي **الطلب كله** مع الشغل اللي
+# فشل: العميل بياخد 500، ومفيش طلب في الداتابيز، ومفيش رسالة خطأ
+# مفهومة. ده أسوأ من إن سجل الحالة ما يتكتبش أصلاً.
+#
+# التعليق القديم كان بيقول "هنعمل rollback أو commit بعده على أي حال
+# وهذا كفاية" — الفكرة إن الـrollback الآتي بيرمّي الأول. صحيح، بس
+# الثمن إن الطلب نفسه بيضيع. ده بالظبط اللي الاختبار
+# `test_order_is_created_when_everything_push_raises` بيمسكه.
+#
+# `db.begin_nested()` بيصدر `SAVEPOINT` في Postgres. الـrollback
+# بيرجع **للنقطة دي بس** — الشغل اللي قبلها (الطلب) بيفضل متأثر.
+# ده اللي بنحتاجه: "اللي فشل يتشال، اللي نجح يكمّل".
+
+
+def _run_in_savepoint(db: Session, label: str, order_id: Optional[int], fn) -> None:
+    """ينفّذ `fn` داخل SAVEPOINT. أي استثناء بتبتلع بس ما بترميش.
+
+    `fn` بتاخد `db`. لو رمت، بنعمل rollback للـSAVEPOINT بس. لو
+    الـSAVEPOINT نفسه فشل إنشاؤه (مفيش transaction مفتوحة مثلاً)،
+    بن fall back على `db.rollback()` العادي — أحسن من إن الـhelper
+    يبقى هو نفسه مصدر 500.
+    """
+    savepoint = None
+    try:
+        savepoint = db.begin_nested()
+    except Exception:
+        logger.exception(
+            "savepoint_begin_failed",
+            extra={"event": "savepoint_begin_failed", "label": label, "order_id": order_id},
+        )
+    try:
+        fn()
+    except Exception:
+        logger.exception(
+            label,
+            extra={"event": label, "order_id": order_id},
+        )
+        try:
+            if savepoint is not None:
+                savepoint.rollback()
+            else:
+                db.rollback()
+        except Exception:
+            logger.exception("%s_rollback_failed", label)
+            try:
+                db.rollback()
+            except Exception:
+                logger.exception("%s_rollback_retry_failed", label)
+        return
+    if savepoint is not None:
+        try:
+            savepoint.commit()
+        except Exception:
+            logger.exception(
+                "%s_savepoint_commit_failed",
+                label,
+                extra={"event": "%s_savepoint_commit_failed" % label, "order_id": order_id},
+            )
+
+
+def _safe_link_customer_subscriptions(db: Session, order: Order) -> None:
+    """يربط اشتراكات المتصفح (من غير `customer_id`) بالعميل الجديد.
+
+    العميل ممكن يكون اشترك في الإشعارات **قبل** ما يعمل أول طلب (الزر
+    على الصفحة الرئيسية). الاشتراكات دي بتفضل `customer_id = NULL` لحد
+    ما يعمل طلب، وعندها بنربطها هنا.
+
+    **ليه الربط مهم:** من غيره، إشعار "طلبك #12 قيد التجهيز" مش
+    هيلاقي الجهاز خالص.
+    """
+    from sqlalchemy import update
+
+    def _work() -> None:
+        result = db.execute(
+            update(PushSubscription)
+            .where(
+                PushSubscription.customer_id.is_(None),
+                PushSubscription.admin_id.is_(None),
+            )
+            .values(customer_id=order.customer_id)
+        )
+        if result.rowcount:
+            db.flush()
+            logger.info(
+                "push_subscriptions_linked_to_customer",
+                extra={
+                    "event": "push_subscriptions_linked_to_customer",
+                    "order_id": order.id,
+                    "customer_id": order.customer_id,
+                    "count": result.rowcount,
+                },
+            )
+
+    _run_in_savepoint(db, "push_subscription_link_failed", order.id, _work)
+
+
+
+def _safe_record_status(db: Session, order: Order, status_value: str) -> None:
+    """يسجّل سطر الحالة الأول — ما بيرميش.
+
+    **نفس منطق الـSAVEPOINT:** لو `record_status_change` فشل، بنشيل
+    الشغل اللي فشل بس. الـorder نفسه لسه في الـsession ومحفوظ
+    زي ما هو. `db.rollback()` هنا كان بيرمي الطلب معاه.
+    """
+    _run_in_savepoint(
+        db,
+        "status_history_write_failed",
+        order.id,
+        lambda: push.record_status_change(db, order, status_value),
+    )
+
+
+def _safe_notify_admins(db: Session, order: Order) -> None:
+    """إشعار "طلب جديد" لكل اشتراكات الأدمن النشطة — ما بيرميش.
+
+    **بعد** الـcommit. `send_and_commit` بيعمل commit مستقل، فأي تعديل
+    على جدول الاشتراكات بيتحفظ لوحده.
+    """
+    try:
+        if not push.is_configured():
+            return
+        subscriptions = push.active_admin_subscriptions(db)
+        if not subscriptions:
+            return
+        summary = push.send_and_commit(
+            db,
+            subscriptions,
+            payload=push.new_order_payload(order),
+            audience=push.AUDIENCE_ADMIN,
+            order_id=order.id,
+        )
+        if summary.sent or summary.failed:
+            logger.info(
+                "new_order_push_sent",
+                extra={
+                    "event": "new_order_push_sent",
+                    "order_id": order.id,
+                    "total": summary.total,
+                    "sent": summary.sent,
+                    "failed": summary.failed,
+                    "invalid": summary.invalid,
+                },
+            )
+    except Exception:
+        logger.exception(
+            "new_order_push_failed",
+            extra={"event": "new_order_push_failed", "order_id": order.id},
+        )
+        try:
+            db.rollback()
+        except Exception:
+            logger.exception("new_order_push_rollback_failed")
+
+
 @router.post("/orders", response_model=OrderCreated)
 def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCreated:
     restaurant_settings = get_settings(db)
 
-    # 0) ساعات استقبال الطلبات —.globale على مستوى المطعم كله. العميل
+    # 0) ساعات استقبال الطلبات — عامة على مستوى المطعم كله. العميل
     #    يقدر يتفرج على الموقع وهو مقفول، بس مش يقدر يبعت طلب.
     if not is_within_ordering_hours(
         restaurant_settings.ordering_open_time,
@@ -621,8 +804,25 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
     #    قناة تواصل مش مصدر حقيقة، فالطلب لازم يكون موجود قبل أي رسالة.
     is_whatsapp = payload.channel == OrderChannel.whatsapp
 
+    # 10) سطر الحالة الأولى + ربط اشتراكات المتصفح بالعميل — قبل الـcommit
+    #     عشان السطر والطلب يتحفظوا في معاملة واحدة.
+    #
+    #     `_safe_*` helpers دي **ما بيرميوش استثناءات أبداً**: فشلت هنا
+    #     معناه الطلب اتسجل من غير سجل حالة أو من غير ربط اشتراكات، ومش
+    #     معناه إن العميل خسر طلبه.
+    _safe_link_customer_subscriptions(db, order)
+    _safe_record_status(db, order, order.status)
+
     db.commit()
     db.refresh(order)
+
+    # 11) إشعار "طلب جديد" للأدمن — **بعد** الـcommit.
+    #
+    #     الترتيب ده مقصود: الإرسال بيبعت على الشبكة وبيعمل commit
+    #     خاص بيه. لو الإرسال جا قبل الـcommit الأول، أي خطأ كان هيعمل
+    #     rollback للطلب نفسه — والطلب **اتحفظ**.
+    _safe_notify_admins(db, order)
+
     return OrderCreated(
         order_id=order.id,
         status=order.status,
