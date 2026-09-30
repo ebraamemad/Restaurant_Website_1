@@ -85,6 +85,31 @@ def verify_csrf_token(token: Optional[str]) -> bool:
     return hmac.compare_digest(signature, _csrf_signature(nonce))
 
 
+# ------------------------------------------------------------
+# توقيع نتيجة عملية (نفس فكرة الـCSRF، هدف تاني)
+# ------------------------------------------------------------
+
+
+def sign_result(code: str, state: str = "") -> str:
+    """توقيع للنتيجة المعروضة بعد redirect.
+
+    **ليه ده لازم:** نتيجة زي "الرسالة اتبعتت" جاية في الـquery
+    string. لو الرموز مقبولة كما هي، أي حد يبعت رابط الصفقة
+    بإيده ويخلي الأدمن يشوف نجاحًا مش حصل. التوقيع بيقول: ده
+    رمز كتبه **الكود** بعد عملية حقيقية، مش حد بيكتب رابط.
+    """
+    payload = f"{code}|{state}"
+    return hmac.new(
+        settings.app_secret_key.encode(), payload.encode(), hashlib.sha256
+    ).hexdigest()[:16]
+
+
+def verify_result_signature(code: str, state: str, signature: Optional[str]) -> bool:
+    if not code or not signature:
+        return False
+    return hmac.compare_digest(signature, sign_result(code, state))
+
+
 def csrf_field(request: Request) -> Markup:
     token = getattr(request.state, "csrf_token", "") or ""
     return Markup(f'<input type="hidden" name="csrf_token" value="{token}">')

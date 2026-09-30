@@ -41,10 +41,12 @@
         <span class="text-xs font-bold text-slate-600">القناة</span>
         <select name="channel" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
           <option value="push">Push (إشعارات)</option>
-          {# موجودة في الموديل بس التنفيذ في مرحلة لاحقة. معطّلة عشان
-             الأدمن مايحفظش حملة مش هتتبعت. #}
-          <option value="whatsapp" disabled>WhatsApp — قريباً</option>
-          <option value="both" disabled>Push + WhatsApp — قريباً</option>
+          {# واتساب منفّذة من Phase 5. الاختيار بيحفظ الحملة بس؛
+             لو الإعدادات ناقصة، `send_campaign` بيرفض بـ`ChannelNotReady`
+             **قبل** ما الحالة تتحوّل لـ`sending`، فالحملة بتفضل
+             قابلة للتعديل. #}
+          <option value="whatsapp">WhatsApp</option>
+          <option value="both">Push + WhatsApp</option>
         </select>
       </label>
     </div>

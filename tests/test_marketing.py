@@ -255,7 +255,7 @@ class TestSegments:
 
     def test_contradictory_thresholds_are_rejected(self):
         """نشط 90 يوم وخامل 30 يوم = شريحتان بعض. خطأ واضح بدل
-       结果的 غلط."""
+       نتيجة غلط."""
         with pytest.raises(segments.AudienceError):
             segments.parse_params(recently_active_days=90, inactive_days=30)
 
@@ -534,16 +534,29 @@ class TestCampaignLifecycle:
         )
         assert campaign.status == marketing.STATUS_SCHEDULED
 
-    def test_whatsapp_campaign_is_registered_but_not_executable(self, db):
-        """القناة بتتسجّل ( Phase 5 هيكمّلها) بس `send_campaign`
-        بيرفضها — مش بنزعم她是 اتبعت."""
+    def test_whatsapp_campaign_without_config_is_not_sendable(self, db):
+        """القناة منفّذة، بس من غير إعدادات مظبوطة الرمي بيحصل
+        **قبل** ما الحالة تتحوّل لـ`sending`.
+
+        الاختبار ده كان في Phase 4 بيعني "القناة لسه منفّذتش".
+        الفرق بين الحالتين مهم للأدمن: الأولى "لسه بنكتب كود"،
+        التانية "ظبّط الإعدادات" — والرسالة اللي بتظهر في اللوحة
+        بتتغيّر فيها تغيير.
+        """
         campaign = marketing.create_campaign(
             db, name="w", title="w", message="w", audience_type="all", channel="whatsapp"
         )
         assert campaign.channel == "whatsapp"
-        assert not marketing.is_executable("whatsapp")
+        assert marketing.is_executable("whatsapp")
+
         with pytest.raises(marketing.ChannelNotReady):
             marketing.send_campaign(db, campaign)
+
+        # الأهم: الحملة فضلت `draft`. الرفض قبل `sending` معناه
+        # إن الأدمن يقدر يصلّح ويعدّي تاني من غير تنظيف.
+        db.refresh(campaign)
+        assert campaign.status == marketing.STATUS_DRAFT
+        assert campaign.started_at is None
 
     def test_unknown_channel_is_rejected(self, db):
         with pytest.raises(marketing.CampaignError):

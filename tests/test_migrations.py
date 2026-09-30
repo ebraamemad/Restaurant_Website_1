@@ -68,35 +68,34 @@ class TestChainStructure:
         assert names["c3d4e5f6a7b8"] == "c3d4e5f6a7b8_phase1_branches.py"
         assert down["c3d4e5f6a7b8"] == "b2c3d4e5f6a7"
 
-    def test_the_phase2_payments_tracking_migration_is_the_head(self) -> None:
+    def test_the_head_follows_the_latest_phase(self) -> None:
         """الـhead بيتغيّر مع كل مرحلة — الـassertion الثابت بيكسر.
 
         **ليه مش هنمسك الـhead دايمًا:** كل phase جديدة بتضيف
         migration فوق، فلو الاختبار Pins revision معيّن زي
-        `d4e5f6a7b8c9` هيفشل مع كل مرحلة جديدة — والكلام الحقيقي
-        في الاسم (`is_the_head`) بيبقى كذب.
+        `d4e5f6a7b8c9` هيفشل مع كل مرحلة جديدة.
 
         اللي بيتحقق منه فعلاً ويفضل صحيح:
-        1. الـPhase 2 لسه في السلسلة.
-        2. لسه متربّعة **مباشرة** على Phase 1 — مفيش migration في النص.
-        3. الـhead الحالي هو migration الـMarketing.
+        1. الـPhase 2 لسه في السلسلة، ومربّعة على Phase 1.
+        2. آخر phase (الـhead الحالي) مبنية **مباشرة** على اللي قبلها.
+        3. الـdown_revision بتاع الـhead بيودّي لنفس السلسلة.
         """
         from tools.migration_report import load, order_chain
 
         names, down, _ = load()
         chain, _ = order_chain(down)
 
-        # (2) دي الـinvariant الحقيقية: لو الـdown_revision بتاع Phase 2
+        # (1) دي الـinvariant الحقيقية: لو الـdown_revision بتاع Phase 2
         #     اتغيّر، الـdeployments القديمة بقى عندها مسار تاني.
         assert "d4e5f6a7b8c9" in chain
         assert names["d4e5f6a7b8c9"] == "d4e5f6a7b8c9_phase2_payments_tracking.py"
         assert down["d4e5f6a7b8c9"] == "c3d4e5f6a7b8"
 
-        # (1) و(3) الـhead بيتتبع آخر phase مضافة. لو الملف اتغيّر،
-        #     الاختبار هيفصل هنا والرسالة هتبين.
-        assert chain[-1] == "a7b8c9d0e1f2"
-        assert names[chain[-1]] == "a7b8c9d0e1f2_phase4_campaign_audience_params.py"
-        assert down["a7b8c9d0e1f2"] == "f6a7b8c9d0e1"
+        # (2) و(3) الـhead بيتتبع آخر phase مضافة (Phase 5 — واتساب).
+        # لو الملف اتغيّر، الاختبار هيفصل هنا والرسالة هتبين.
+        assert chain[-1] == "b8c9d0e1f2a3"
+        assert names[chain[-1]] == "b8c9d0e1f2a3_phase5_whatsapp_sending.py"
+        assert down["b8c9d0e1f2a3"] == "a7b8c9d0e1f2"
 
 
 class TestNoDuplicateDdl:

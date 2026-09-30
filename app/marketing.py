@@ -1,17 +1,17 @@
 """حملات التسويق — الإنشاء، المعاينة، الإرسال، الإيقاف، السجل.
 
-## الفصل عن `app.push`
+الـendpoint. يعني لو اتغير `app.push`، الحملة مش بتتأثر.
 
 `app.push` واثق وبيعرف **إزاي** يبعت إشعار لاشتراك واحد. الموديول ده
 بيعرف **مين** يستقبل و**إمتى**، ومش بيفتكر في التوقيع ولا في
-الـendpoint. يعني لو اتغير pp.push، الحملة مش بتتأثر.
+الـendpoint. يعني لو اتغير `app.push`، الحملة مش بتتأثر.
 
 الفصل ده مقصود عشان المرحلة الجاية (واتساب) تضيف قناة تانية من غير
 ما تلمس ده.
 
 ## ليه `require_push_subscription=True` في الإرسال
 
-عميل مالوش اشتراك push مش بيبقى مستلم — مشSending "to" حد مش
+عميل مالوش اشتراك push مش بيبقى مستلم — مفيش "to" حد مش
 موجود. العدّاد `recipients` معناه **أجهزة** مش **عملاء** (عميل واحد
 بجهازين = سطرين). عشان كده `total_recipients` بيتقارن بعدد
 الاشتراكات مش بعدد العملاء.
@@ -54,7 +54,7 @@ from decimal import Decimal
 from typing import List, Optional
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app import push
 from app.models import (
@@ -63,6 +63,7 @@ from app.models import (
     Customer,
     Order,
     PushSubscription,
+    WhatsAppAttempt,
 )
 from app.segments import (
     AudienceParams,
@@ -91,11 +92,12 @@ CHANNEL_PUSH = "push"
 CHANNEL_WHATSAPP = "whatsapp"
 CHANNEL_BOTH = "both"
 
-#: القنوات اللي **منفّذة** فعلاً في المرحلة دي. الـwhatsapp
-#: بتتخزّن وبتظهر في السجل، بس مش بتتبعت.
-EXECUTABLE_CHANNELS = frozenset({CHANNEL_PUSH})
+#: القنوات اللي تقدر تتنفّذ **دلوقتي**. واتساب بقت منفّذة في
+#: Phase 5 — بس تنفيذها محتاج إعدادات: من غيرها الحملة بتتقفل
+#: بـ`ChannelNotReady` **قبل** ما تتحوّل لـ`sending`.
+EXECUTABLE_CHANNELS = frozenset({CHANNEL_PUSH, CHANNEL_WHATSAPP, CHANNEL_BOTH})
 
-#:Campaign statuses اللي يقدر يتحوّل لـsending. `completed` و
+#: Campaign statuses اللي يقدر يتحوّل لـsending. `completed` و
 #: `cancelled` نهائيين — إعادة إرسال حملة اتلغت معناها الأدمن غيّر
 #: رأيه اعتم’d حملة جديدة.
 SENDABLE_FROM = frozenset({STATUS_DRAFT, STATUS_SCHEDULED})
@@ -125,7 +127,13 @@ class CampaignError(ValueError):
 
 
 class ChannelNotReady(CampaignError):
-    """القناة لسه منفّذتش — الرسالة واضحة والأدمن عارف يعيد المحاولة."""
+    """القناة معروفة بس مش جاهزة للإرسال — الرسالة بتقول ليه.
+
+    رفعنا الحالة دي في Phase 5 عن حالتين كانت بتاخد نفس الاسم:
+    "القناة لسه منفّذتش" (خلاص بقت غلط — بقت منفّذة) و"الإعدادات
+    ناقصة" (اللي محتاج يتقال فعلاً). الأدمن بيشوف الفرق في
+    الرسالة، والاختبارات بيفرّقوا في الكود.
+    """
 
 
 # ============================================================
@@ -133,6 +141,10 @@ class ChannelNotReady(CampaignError):
 # ============================================================
 
 
+#: **`channel` مش هنا عن قصد.** القناة عمود لوحده في `campaigns`
+#: بيتقفل وقت الإنشاء؛ تخزينها هنا كان هيسمح يعدّلها بعد المعاينة
+#: من غير ما الأدمن يشوف، والتقرير يبقى غلط.
+#:
 #: الحقول اللي بتتخزّن في `campaigns.audience_params`.
 #:
 #: **مش كل حقول `AudienceParams`:** `respect_opt_out` دايماً `True`
@@ -512,6 +524,9 @@ def _recipient_rows_for(db: Session, campaign: Campaign, params: AudienceParams)
                 subscription_id=sub.id,
                 customer_name=customer.name if customer else None,
                 customer_phone=customer.phone if customer else None,
+                # السطر ده للإشعار بس. نفس العميل في حملة `both`
+                # هيبقى ليه سطر تاني مستقل بيبدأ من `whatsapp`.
+                channel=CHANNEL_PUSH,
                 status="pending",
             )
         )
@@ -560,6 +575,8 @@ def send_campaign(
     *,
     params: Optional[AudienceParams] = None,
     chunk_size: int = SEND_CHUNK_SIZE,
+    whatsapp_provider=None,
+    whatsapp_config=None,
 ) -> Campaign:
     """ينفّذ الحملة. **متزامن**، بيتقطع كل `chunk_size` رسالة.
 
@@ -575,18 +592,42 @@ def send_campaign(
     `campaign.audience_params` — نفس القيم اللي شافتها الأدمن في
     المعاينة. لو حد مرر `params` صراحة، بنستخدمه عشان نختبر حالة
     معيّنة بدون ما نعدّل في الداتابيز.
+
+    ## `whatsapp_provider` / `whatsapp_config`
+
+    حقن للمزوّد والإعدادات — **للاختبارات بس**، عشان نختبر
+    الإرسال من غير Evolution حقيقي. من غيرهم بنقرأ من الـDB
+    والبيئة زي ما الأدمن ظبّط.
+
+    ## القنوات المستقلة
+
+    حملة `both` = **مرحلتين في نفس النداء**: إشعار، وبعدين
+    واتساب. كل قناة لها سطورها في `campaign_recipients` (عمود
+    `channel`)، ونتائجها بتتخمّد في عدّادات الحملة. لو قناة
+    فشلت، التانية **بتكمل** — مزوّد واتساب واقع مش معناه إن
+    إشعارات العميل ماتت.
+
+    ## ليه فحص جاهزية واتساب **قبل** `sending`
+
+    لو المزوّد مش مظبوط، الأدمن دوس إرسال، والحملة اتعلقت في
+    `sending` لحد ما حد يدخل يدوي ويظبطها. الفحص قبل تغيير
+    الحالة بيخلي الرفض مالوش أثر: الحملة فضلت `draft` والأدمن
+    شاف رسالة "ظبّط الإعدادات" ورجع للوحة.
     """
     if campaign.status not in SENDABLE_FROM:
         raise CampaignError(
             f"الحملة في حالة {campaign.status} — مش هتتنفّذ تاني"
         )
     if not is_executable(campaign.channel):
-        raise ChannelNotReady(
-            "قناة واتساب لسه منفّذتش (Phase 5). الحملة اتسجّلت في السجل."
-        )
+        raise ChannelNotReady(f"قناة مش معروفة: {campaign.channel}")
 
     base_params = params if params is not None else _params_for_campaign(campaign)
-    send_params = base_params.evolve(require_push_subscription=True)
+    channels = _channels_for(campaign.channel)
+
+    # فحص الجاهزية **قبل** `sending` — شوف الـdocstring.
+    whatsapp_service = None
+    if CHANNEL_WHATSAPP in channels:
+        whatsapp_service = _require_whatsapp_service(db, whatsapp_config)
 
     campaign.status = STATUS_SENDING
     campaign.started_at = _now_utc()
@@ -596,40 +637,133 @@ def send_campaign(
     campaign.total_recipients = 0
     db.commit()
 
-    # 1) تحديد المستلمين — في معاملة منفصلة عشان لو فشل، الحملة
-    #    ترجع لـ`draft` بدل ما تفضل `sending` للأبد.
-    try:
-        recipient_count = _recipient_rows_for(db, campaign, send_params)
-    except Exception:
-        db.rollback()
-        campaign.status = STATUS_DRAFT
-        campaign.started_at = None
-        db.commit()
-        logger.exception("campaign_recipient_resolve_failed", extra={"campaign_id": campaign.id})
-        raise
-    campaign.total_recipients = recipient_count
-    db.commit()
+    totals = _Counters()
+    cancelled_mid_flight = False
 
-    if recipient_count == 0:
-        campaign.status = STATUS_COMPLETED
-        campaign.completed_at = _now_utc()
+    for channel in channels:
+        try:
+            if channel == CHANNEL_PUSH:
+                chunk = _run_push_channel(db, campaign, base_params, chunk_size)
+            else:
+                chunk = _run_whatsapp_channel(
+                    db,
+                    campaign,
+                    base_params,
+                    whatsapp_service,
+                    provider=whatsapp_provider,
+                    config=whatsapp_config,
+                )
+        except Exception:
+            db.rollback()
+            campaign = db.get(Campaign, campaign.id)
+            if campaign is not None:
+                campaign.status = STATUS_DRAFT
+                campaign.started_at = None
+                db.commit()
+            logger.exception(
+                "campaign_channel_failed",
+                extra={"campaign_id": campaign.id if campaign else None, "channel": channel},
+            )
+            raise
+        totals.add(chunk)
+        _write_counters(db, campaign, totals)
         db.commit()
-        return campaign
+        if chunk.cancelled:
+            cancelled_mid_flight = True
+            break
+
+    return _finalize(
+        db,
+        campaign,
+        totals.sent,
+        totals.failed,
+        totals.invalid,
+        totals.skipped,
+        cancelled_mid_flight,
+    )
+
+
+def _channels_for(channel: str) -> List[str]:
+    """ترتيب التنفيذ. `push` الأول عمداً.
+
+    الإشعار أرخص وأسرع، فلو الحملة اتلغت في نصها يبقى العميل
+    وصله إشعار قبل ما يتعب نفسه في رسالة واتساب.
+    """
+    if channel == CHANNEL_BOTH:
+        return [CHANNEL_PUSH, CHANNEL_WHATSAPP]
+    return [channel]
+
+
+def _require_whatsapp_service(db: Session, config=None):
+    """يجهّز خدمة واتساب أو بيرمي `ChannelNotReady` برسالة مفهومة.
+
+    الاستيراد جوه الدالة مش عشان الدالة بطيئة — عشان
+    `app.whatsapp.service` بيستورد `app.marketing` (للـconstants)،
+    فالاستيراد وقت التحميل كان هيعمل دورة.
+    """
+    from app.whatsapp import base as wa_base
+    from app.whatsapp import service as wa_service
+
+    try:
+        if config is None:
+            config = wa_service.load_config(db)
+        config.assert_sendable()
+    except wa_base.WhatsAppConfigurationError as exc:
+        raise ChannelNotReady(f"إعدادات واتساب ناقصة: {exc}") from exc
+    return wa_service
+
+
+@dataclass
+class _Counters:
+    """عدّادات مرحلة واحدة من الحملة.
+
+    الـdataclass مش زينة: هي عشان `totals.add(chunk)` بدل سلسلة
+    `sent += chunk.sent` بتتنسى لو قناة جديدة اتضافت بكرة.
+    """
+
+    processed: int = 0
+    sent: int = 0
+    failed: int = 0
+    invalid: int = 0
+    skipped: int = 0
+    cancelled: bool = False
+
+    def add(self, other: "_Counters") -> None:
+        self.processed += other.processed
+        self.sent += other.sent
+        self.failed += other.failed
+        self.invalid += other.invalid
+        self.skipped += other.skipped
+        self.cancelled = self.cancelled or other.cancelled
+
+
+def _run_push_channel(
+    db: Session,
+    campaign: Campaign,
+    base_params: AudienceParams,
+    chunk_size: int,
+) -> _Counters:
+    """مرحلة الإشعارات. بترجّع العدّادات بتاعتها بس — مش بتلمس
+    حالة الحملة النهائية."""
+    send_params = base_params.evolve(require_push_subscription=True)
+    counters = _Counters()
+    recipient_count = _recipient_rows_for(db, campaign, send_params)
+    if recipient_count == 0:
+        return counters
 
     payload = build_payload(campaign)
     chunk_size = max(1, int(chunk_size))
     subscription_cache: dict[int, PushSubscription] = {}
-    processed = 0
-    sent = failed = invalid = skipped = 0
-    cancelled_mid_flight = False
 
     while True:
-        # 2) شريحة: هنلفّ على الـpending بس. اللي خلصناه اتغيّر
-        #    حالته، فمش هيبان تاني.
+        # شريحة: هنلفّ على الـpending بس. اللي خلصناه اتغيّر حالته،
+        # فمش هيبان تاني. الفلتر على `channel` مهم: حملة `both`
+        # فيها سطور واتساب مستنية، دي مش بتاعة المرحلة دي.
         pending = db.execute(
             select(CampaignRecipient)
             .where(
                 CampaignRecipient.campaign_id == campaign.id,
+                CampaignRecipient.channel == CHANNEL_PUSH,
                 CampaignRecipient.status == "pending",
             )
             .order_by(CampaignRecipient.id)
@@ -650,7 +784,8 @@ def send_campaign(
                 # إرسال — مفيش حاجة نبعتها.
                 recipient.status = "skipped"
                 recipient.error = "الاشتراك بقى مش موجود"
-                skipped += 1
+                counters.skipped += 1
+                counters.processed += 1
                 continue
 
             try:
@@ -661,13 +796,13 @@ def send_campaign(
                 recipient.response_code = result.response_code
                 if result.sent:
                     recipient.sent_at = _now_utc()
-                    sent += 1
+                    counters.sent += 1
                 elif recipient.status == "skipped":
-                    skipped += 1
+                    counters.skipped += 1
                 elif recipient.status == "invalid":
-                    invalid += 1
+                    counters.invalid += 1
                 else:
-                    failed += 1
+                    counters.failed += 1
             except Exception:
                 # `send_to_subscription` متعاقد إنه ما بيرميش. لو
                 # رمي، يبقى فيه bug — سطر واحد ميت، والباقي عايش.
@@ -677,45 +812,81 @@ def send_campaign(
                 )
                 recipient.status = "failed"
                 recipient.error = "خطأ داخلي وقت الإرسال"
-                failed += 1
-            processed += 1
+                counters.failed += 1
+            counters.processed += 1
 
-        # 3) commit الشريحة + مراجعة الإلغاء. لو الأدمن دوس
-        #    "إيقاف" من تاب تاني، الحالة بقت `cancelled` في
-        #    الداتابيز وده اللي بنقراه.
-        _write_counters(db, campaign, processed, sent, failed, invalid, skipped)
+        # commit الشريحة + مراجعة الإلغاء. لو الأدمن دوس "إيقاف"
+        # من تاب تاني، الحالة بقت `cancelled` في الداتابيز وده
+        # اللي بنقراه.
         db.commit()
         if _refresh_status(db, campaign) == STATUS_CANCELLED:
-            cancelled_mid_flight = True
+            counters.cancelled = True
             break
 
-    campaign = _finalize(db, campaign, sent, failed, invalid, skipped, cancelled_mid_flight)
-    return campaign
+    return counters
+
+
+def _run_whatsapp_channel(
+    db: Session,
+    campaign: Campaign,
+    base_params: AudienceParams,
+    whatsapp_service,
+    *,
+    provider=None,
+    config=None,
+) -> _Counters:
+    """مرحلة واتساب. بترجّع العدّادات بتاعتها بس.
+
+    **الخدمة بتعمل `db.refresh` جوّاها**: الإلغاء لازم يشتغل زي
+    ما بيشتغل مع الـpush. الخدمة بترجّع `cancelled` لو الحالة
+    اتغيّرت في تاب تاني، والعدّادات اللي رجعت بتkon اللي اتنفّذ.
+    """
+    import asyncio
+
+    counters = _Counters()
+    summary = whatsapp_service.enqueue_recipients(db, campaign, base_params)
+    counters.invalid = summary.invalid
+    counters.skipped = summary.opted_out
+    if summary.queued == 0:
+        db.commit()
+        return counters
+
+    result = asyncio.run(
+        whatsapp_service.run_campaign(db, campaign, provider=provider, config=config)
+    )
+    counters.sent = result.sent
+    counters.failed = result.failed
+    counters.invalid += result.invalid
+    counters.skipped += result.skipped
+    counters.processed = counters.sent + counters.failed + counters.invalid + counters.skipped
+    counters.cancelled = result.cancelled
+    return counters
 
 
 def _write_counters(
     db: Session,
     campaign: Campaign,
-    processed: int,
-    sent: int,
-    failed: int,
-    invalid: int,
-    skipped: int,
+    totals: _Counters,
 ) -> None:
-    """يكتب العدادات على الحملة.
+    """يكتب العدادات المجمّعة على الحملة.
 
-    `processed` بـ`total_recipients - المرسلين - skipped` مش
-    `len(pending)` المتغيّر — عشان لو حصل إعادة تنفيذ جزئية
-    العداد ميبقاش غلط.
+    بتاخد `_Counters` مش ست أرقام، لأن الحملة ممكن يكون ليها
+    مرحلتين (إشعار وواتساب) وكل واحدة بتجيب أرقامها. لو الدالة
+    كانت ست positional parameters، إضافة قناة جديدة معناها نسيان
+    تعديل النداء.
+
+    `processed` هو مجموع اللي اتعاملنا معاهم فعلاً — مش عدد
+    السطور في الطابور. الفرق مهم: لو عميل رفض الإذن بين
+    التجهيز والإرسال، السطر مش هيتحسب مرتين.
 
     ملاحظة: `invalid` **مش جزء** من `failed` في التقرير العام،
     بس بيتحسب في `total` عشان يبقى مفهوم: "1200 بعت، 30 رفض
     المزوّد، 5 فشلوا" هيبقى أوضح من "1200 بعت، 35 فشلوا".
     """
-    campaign.sent_count = sent
-    campaign.failed_count = failed
-    campaign.invalid_count = invalid
-    campaign.total_recipients = processed
+    campaign.sent_count = totals.sent
+    campaign.failed_count = totals.failed
+    campaign.invalid_count = totals.invalid
+    campaign.total_recipients = totals.processed
     db.flush()
 
 
@@ -880,6 +1051,70 @@ def recipient_breakdown(db: Session, campaign_id: int) -> dict[str, int]:
     return counts
 
 
+def recipient_breakdown_by_channel(
+    db: Session, campaign_id: int
+) -> dict[str, dict[str, int]]:
+    """نفس العدّاد بس مقسوم على القنوات.
+
+    حملة `both` فيها سطر لكل قناة لنفس العميل. رقم واحد مخلوط
+    بيقول "20 رسالة اتبعتت" والأدمن مش عارف 12 دي إشعارات ولا
+    8 واتساب — والتقرير المضلّل ده أسوأ من تقرير ناقص.
+    """
+    from app.whatsapp import service as whatsapp_service
+
+    return whatsapp_service.counts_by_channel(db, campaign_id)
+
+
+def cancelled_recipients(db: Session, campaign: Campaign) -> int:
+    """عدد السطور اللي زر الإيقاف مسكها قبل ما تتبعت.
+
+    **مش حالة سطر.** الإلغاء بيوقّف التشغيل ويسيب الباقي `pending`
+    عن قصد — السطر ده يفضل قابل للاستئناف. فالرقم بيتحسب من حالة
+    الحملة مش من عمود: حملة ملغاة فيها 30 سطر `pending` معناها 30
+    رسالة اتلغى إرسالها، وحملة شغالة فيها 30 `pending` معناها 30
+    لسه ما وصلتش الدور لها. نفس قاعدة البيانات، معنيين مختلفين.
+    """
+    if campaign.status != STATUS_CANCELLED:
+        return 0
+    return int(
+        db.execute(
+            select(func.count(CampaignRecipient.id)).where(
+                CampaignRecipient.campaign_id == campaign.id,
+                CampaignRecipient.status == "pending",
+            )
+        ).scalar_one()
+    )
+
+
+def recipient_attempts(db: Session, campaign_id: int, limit: int = 50):
+    """آخر محاولات واتساب للحملة، وسطر العميل بتاع كل واحدة.
+
+    **ليه دي مش `whatsapp_attempts` لوحدها**: السطر نفسه بيقول
+    "المحاولة التلاتة رجعت 429"، مش مين. الأدمن محتاج يربطها
+    بالعميل وبالقناة عشان يقرر: أعمل إعادة لكل الحملة، ولا أوقف
+    المزوّد، ولا العميل ده مش على واتساب أصلاً.
+
+    الأحدث أولاً + سقف — حملة 20 ألف عميل ممكن سجلّها 60 ألف سطر،
+    والصفحة دي تقرير مش تنزيل.
+
+    **اللي مش بيتعرض**: `WhatsAppAttempt.raw`. العمود ده رد المزوّد
+    المختصر وممكن يبان فيه اللي ما لهاش لازمة. سبب المحاولة
+    (`error`) متقصوص ومتنضّف في المزوّد وهو كفاية.
+    """
+    return (
+        db.execute(
+            select(WhatsAppAttempt)
+            .options(joinedload(WhatsAppAttempt.recipient))
+            .where(WhatsAppAttempt.campaign_id == campaign_id)
+            .order_by(WhatsAppAttempt.id.desc())
+            .limit(limit)
+        )
+        .scalars()
+        .unique()
+        .all()
+    )
+
+
 def failed_recipients(db: Session, campaign_id: int, limit: int = 50):
     """أول الـfailures مع سبب كل واحد — عشان الأدمن يفهم المشكلة."""
     return (
@@ -909,10 +1144,9 @@ def set_marketing_opt_out(
 
     ملاحظة على التصميم: ده **مش** بيلغي اشتراك الـpush. العميل
     ممكن يكون عايز "طلبك في الطريق" (transaction) بس مش عايز عروض.
-#: الإشعار خالص، لازم نعمل ده من إعدادات المتصفح أو من نفس
-    نفس زرار الإشعارات — قراره هو.
-
-   atsächlich وده نفس الفصل اللي في `Customer.marketing_opt_out`.
+    إشعار العروض خالص يُقفله العميل نفسه من
+    إعدادات المتصفح أو زرار الإشعارات — ده شغله.
+    وده نفس الحقل في `Customer.marketing_opt_out`.
     """
     customer.marketing_opt_out = opt_out
     customer.marketing_opt_out_at = _now_utc() if opt_out else None

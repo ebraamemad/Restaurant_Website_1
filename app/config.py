@@ -70,6 +70,42 @@ class Settings(BaseSettings):
         "push.services.mozilla.com"
     )
 
+    # Phase 5 — WhatsApp (Evolution API)
+    #
+    # **الأسرار هنا من الـenvironment، مش من الـDB.** الـDB قابلة
+    # للقراءة والتعديل من لوحة الأدمن، والـ`.env` لأ. لو حطّينا الـkey
+    # في الجدول كان كل-admin عنده صلاحية يقراه من أي شاشة. هنا
+    # `get_api_key()` هي الدالة الوحيدة المسموح لها تقرأ
+    # `evolution_api_key`، و`get_vapid_public_key_browser`-analog
+    # بتاعنا (`masked_...`) بيرجّع قناع مش قيمة.
+    whatsapp_enabled: bool = False
+    #: `evolution` هو المزوّد الوحيد المنفّذ دلوقتي. القيمة موجودة
+    #: كعمود صراحةً عشان لما ييجى مزوّد رسمي نضيفه من غير ما نغيّر
+    #: شكل البيانات ولا الـmigration.
+    whatsapp_provider: str = "evolution"
+    evolution_base_url: str | None = None
+    evolution_instance: str | None = None
+    evolution_api_key: str | None = None
+    #: مهلة الطلب الثابتة لكل نداء مزوّد. من غيرها مزوّد معلّق
+    #: بيبطّل حملة كاملة — وHTTP request معلّق مفيش حد بيعرف.
+    whatsapp_request_timeout_seconds: float = 20.0
+    #: رقم بتبعتله رسالة الاختبار. لازم يكون **رقمك أنت** — مش رقم
+    #: عميل. رسالة اختبار على رقم عميل = دوسة على عميل حقيقي.
+    whatsapp_test_phone: str | None = None
+    whatsapp_test_message: str = "رسالة اختبار"
+    #: يسمح بالاتصال بـloopback بس (`127.0.0.1` / `::1`) للتطوير
+    #: على Evolution محلي. **مش كل الشبكة الداخلية** — الاستثناء
+    #: اتضيّق عشان كان بي.skip الفحص كله، فأي حد يقدر يوجّه
+    #: السيرفر لـ`169.254.169.254`.
+    #:
+    #: الافتراضي `false` = مقفول. في production الاستثناء ده
+    #: **بيتتجاهل بالكامل** حتى لو حد wrote `true` بالغلط.
+    whatsapp_allow_private_hosts: bool = False
+    #: النطاقات المسموح الاتصال بيها وقت التشغيل.
+    #: **قائمة أمان مش تفضيل** — نفس منطق `push_allowed_endpoint_hosts`.
+    #: من غيرها أي نطاق برّه المتصفح المزوّد مسموح. `*` مرفوض.
+    whatsapp_allowed_hosts: str = ""
+
     # Phase 0 — سلوك الكوكيز في الإنتاج
     # لو True، التطبيق بيفشل في الإقلاع في production لو الكوكيز مش secure.
     # ده يمنع نشر production على HTTP عادي بالغلط.

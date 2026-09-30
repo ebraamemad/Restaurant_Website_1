@@ -78,12 +78,22 @@ STATUS_LABELS = {
 }
 CHANNEL_LABELS = {
     marketing.CHANNEL_PUSH: "Push",
-    marketing.CHANNEL_WHATSAPP: "WhatsApp (قريباً)",
+    marketing.CHANNEL_WHATSAPP: "WhatsApp",
     marketing.CHANNEL_BOTH: "Push + WhatsApp",
 }
-#: القنوات اللي تقدر تتنفذ **دلوقتي**. `whatsapp` بيظهر في الفلتر
-#: (فيه حملات متبنية عليه) بس مش في dropdown الإنشاء.
-EXECUTABLE_CHANNELS = {marketing.CHANNEL_PUSH}
+#: قيم `whatsapp_attempts.state` مع نصها.
+ATTEMPT_STATE_LABELS = {
+    "sent": "اتبعت",
+    "failed": "فشلت",
+    "skipped": "اتخطّت",
+}
+#: القنوات اللي تقدر تتنفذ **دلوقتي**. واتساب بقت منفّذة في Phase 5
+#: — بس تنفيذها محتاج إعدادات، والحملة بتتقفل لو ناقصة (`ChannelNotReady`).
+EXECUTABLE_CHANNELS = {
+    marketing.CHANNEL_PUSH,
+    marketing.CHANNEL_WHATSAPP,
+    marketing.CHANNEL_BOTH,
+}
 AUDIENCE_LABELS = {
     "all": "كل العملاء",
     "segment": "شريحة",
@@ -102,7 +112,7 @@ templates.env.globals["channel_labels"] = CHANNEL_LABELS
 ERROR_MESSAGES = {
     "unknown_segment": "الشرحة دي مش موجودة. من فضلك اختارها من القائمة.",
     "needs_segment": "اختر شرحة من القائمة قبل ما تحفظ الحملة.",
-    "unknown_channel": "قناة الإرسال مش معروفة. المتاح: Push.",
+    "unknown_channel": "قناة الإرسال مش معروفة.",
     "bad_link": "رابط الحملة لازم يكون مسار داخلي يبدأ بـ/ أو رابط https.",
     "bad_image": "صورة الحملة لازم تكون مسار داخلي يبدأ بـ/ أو رابط https.",
     "bad_json": "الطلب مش مفهوم. جرّب تاني.",
@@ -451,13 +461,27 @@ def campaign_detail(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "الحملة مش موجودة")
     breakdown = marketing.recipient_breakdown(db, campaign_id)
     failures = marketing.failed_recipients(db, campaign_id)
+    # `both` فيها سطر لكل قناة، و`whatsapp` بس كمان: الأدمن يشوف
+    # أرقامها مفصولة عن الـpush بدل رقم مخلوط. حملة `push` ما تحتاجش.
+    channel_counts = (
+        marketing.recipient_breakdown_by_channel(db, campaign_id)
+        if campaign.channel in (marketing.CHANNEL_BOTH, marketing.CHANNEL_WHATSAPP)
+        else {}
+    )
     return templates.TemplateResponse(
         "admin/marketing/campaign_detail.html",
         {
             "request": request,
             "campaign": campaign,
             "breakdown": breakdown,
+            "channel_counts": channel_counts,
             "failures": failures,
+            # زر الإيقاف بيسيب الباقي `pending`، فالعدد ده مش
+            # حالة سطر — بيتحسب من حالة الحملة.
+            "cancelled_count": marketing.cancelled_recipients(db, campaign),
+            # سجلّ المحاظات: سطر لكل محاولة واتساب.
+            "attempts": marketing.recipient_attempts(db, campaign_id),
+            "attempt_state_labels": ATTEMPT_STATE_LABELS,
             "error": request.query_params.get("error"),
         },
     )

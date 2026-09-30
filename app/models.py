@@ -24,6 +24,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
+#: `server_default` لـ Boolean. نستخدم `text("false")` مش `sa.false()`
+#: عشان `false` كلمة SQL أصلاً، وdialect بيكتبها زي ما هي. أي حاجة
+#: تانية هنا كانت هتكتب `"0"` على Postgres — اللي رفضها.
+_BOOL_FALSE = text("false")
+_BOOL_TRUE = text("true")
+
 
 class Admin(Base):
     __tablename__ = "admins"
@@ -611,8 +617,8 @@ class Campaign(Base):
 
     مقصود إن `segment_key` يبقى `NULL` لما `audience_type='all'`. ده
     بيدي شرط CHECK في الداتابيز، فالمستحيل تصنع حملة "الكل" ومعاها
-    segment متعارض، ممنوع يجي بالبرمجة. pp.marketing.resolve_audience بيفرض
-    نفس القاعدة من ناحية الكود.
+    segment متعارض، ممنوع يجي بالبرمجة. `app.marketing.resolve_audience`
+    بيفرض نفس القاعدة من ناحية الكود.
 
     ## الحالات
 
@@ -662,8 +668,9 @@ class Campaign(Base):
     audience_params: Mapped[dict] = mapped_column(
         JSON, nullable=False, default=dict, server_default="{}"
     )
-    # `push` | `whatsapp` | `both`. `whatsapp`/`both` بيتسجّلوا بس في
-    # المرحلة دي — التنفيذ في Phase 5. مش بنسلوكم كأنهم اتبعتوا.
+    # `push` | `whatsapp` | `both`. التنفيذ في Phase 5. تسجيل القناة
+    # في الحملة بحد ذاته مش معناه إن الرسالة اتبعتت — العكس كمان:
+    # `channel='whatsapp'` مش دليل على الإرسال.
     channel: Mapped[str] = mapped_column(
         String(20), nullable=False, default="push", server_default="push", index=True
     )
@@ -727,20 +734,32 @@ class CampaignRecipient(Base):
 
     ## ليه جدول استقبال منفصل عن الأرقام على الحملة
 
-    التلات أرقام على `Campaign` (total/sent/failed) **محسوبة** من
-    التلات أرقام على Campaign (total/sent/failed) **محسوبة** من
-    الجدول ده، ومش من غيره:
+    العدادات على `Campaign` **محسوبة** من سطور الجدول ده:
     - "اشتراك باط من المزوّد" ← نقدر نعيد المحاولة مرة تانية.
     - "مين العميل ده فعلاً" → لو نفس العميل عنده جهازين، اتبعت
-      مرتين، سطرين. ده صح: جهازين = رسالتين علىDevices تانية.
+      مرتين، سطرين. ده صح: جهازين = رسالتين على devices تانية.
     - تقرير "did not deliver" بيحتاج سطر لكل جهاز.
+
+    ## `channel` على السطر — ليه التكرار مقصود
+
+        حملة `both` = **سطرين لكل عميل**: واحد `push` وواحد `whatsapp`.
+        البديل (عمود `push_status` و`whatsapp_status` على سطر واحد)
+        بيسبّب قاع في النظام: كل المسارات بتتفرّع على القناة،
+        والعدّادات بتتضاعف، وسؤال "متى نعتبر السطر خلص؟" بيتكرر
+        لكل قناة. السطر بيمثّل **(حملة، عميل، قناة)** بوحدها،
+        ومعاها `status` واحد معناه واحد، والتقرير بيجمّع حسب
+        القناة بتجميع بسيط بدل ما يحسب أعمدة مقترنة.
+
+        تكرار العميل في الحالة دي مقصود: نفس الشخص بيتبعتله إشعار
+        على الموبايل ورسالة واتساب — وده معنى `both`.
 
     ## `status='skipped'` موجود ليش
 
     الاشتراك ممكن يبقى مش `active` بين لحظة الـresolve ولحظة
-    الإرسال (العميل رجع في الإذن، أو المزوّد بطل الـendpoint). ده مش
-    فشل — العميل ما طلبش نوصّله. بنفرّق بين "مش دلوقتي" و"حاولنا
-    وفشلنا" عشان التقرير يبقى أمين.
+    الإرسال (العميل رجع في الإذن، أو المزوّد بطل الـendpoint)،
+    والعميل ممكن يكون سجّل نفسه `marketing_opt_out` بعد ما اتحسب
+    الجمهور. ده مش فشل — العميل ما طلبش نوصّله. بنفرّق بين
+    "مش دلوقتي" و"حاولنا وفشلنا" عشان التقرير يبقى أمين.
     """
 
     __tablename__ = "campaign_recipients"
@@ -758,6 +777,10 @@ class CampaignRecipient(Base):
     # لقطة من وقت الحساب، عشان التقرير يبقى مقروء من غير ما نعمل join.
     customer_name: Mapped[Optional[str]] = mapped_column(String(120))
     customer_phone: Mapped[Optional[str]] = mapped_column(String(30))
+    # القناة اللي السطر ده ليها: `push` | `whatsapp`.
+    channel: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="push", server_default="push", index=True
+    )
     # `pending` → `sent` | `failed` | `skipped` | `invalid`
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending", server_default="pending", index=True
@@ -766,6 +789,25 @@ class CampaignRecipient(Base):
     error: Mapped[Optional[str]] = mapped_column(String(300))
     # كود ردة المزوّد (201/410/500)، لو رجع.
     response_code: Mapped[Optional[int]] = mapped_column(Integer)
+    # --- طابور واتساب --------------------------------------------
+    #
+    # `attempts` + `next_attempt_at` هما **الطابور نفسه**: مفيش جدول
+    # jobs تاني. سطر `pending` وعنده `next_attempt_at` = مستني دوره.
+    # سبب إن جدول تاني كان هيبقى مصدر حقيقة تاني للحالة، واللي
+    # بيحصل مع جدولين هو بالظبط اللي بنحاول نتجنبه.
+    #
+    # `next_attempt_at` بيتقدّم بعد كل فشل مؤقت. `NULL` = مستني
+    # أول محاولة فوراً.
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    next_attempt_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
+    # اسم المزوّد اللي actuاها الرسالة، و`provider_message_id` بتاعه.
+    # بنخزّنهم **على السطر** مش بس في سجل المحاولات عشان التقرير
+    # يقدر يجيبهم من غير join على جدول تالت.
+    provider: Mapped[Optional[str]] = mapped_column(String(30))
+    provider_message_id: Mapped[Optional[str]] = mapped_column(String(120))
+    provider_status: Mapped[Optional[str]] = mapped_column(String(60))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -773,13 +815,156 @@ class CampaignRecipient(Base):
 
     campaign: Mapped[Campaign] = relationship(back_populates="recipients")
     customer: Mapped[Optional["Customer"]] = relationship(back_populates="campaigns")
+    attempts_log: Mapped[List["WhatsAppAttempt"]] = relationship(
+        back_populates="recipient", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         CheckConstraint(
             "status IN ('pending', 'sent', 'failed', 'skipped', 'invalid')",
             name="ck_campaign_recipients_status",
         ),
+        CheckConstraint(
+            "channel IN ('push', 'whatsapp')",
+            name="ck_campaign_recipients_channel",
+        ),
         Index("ix_campaign_recipients_campaign_status", "campaign_id", "status"),
+        # استعلام الـworker بالظبط: سطور واتساب مستنية دورها مرتّبة.
+        # الفهرس المركّب هو اللي بيخلّي ده scan مش sort.
+        Index(
+            "ix_campaign_recipients_queue",
+            "channel",
+            "status",
+            "next_attempt_at",
+            postgresql_where=text("channel = 'whatsapp' AND status = 'pending'"),
+        ),
+    )
+
+
+class WhatsAppAttempt(Base):
+    """محاولة إرسال واحدة — سجل لكل نداء مزوّد، ناجح كان أو فاشل.
+
+    ## ليه سجل مستقل عن `CampaignRecipient`
+
+        السطر بيقول **النتيجة الأخيرة**. ده مش كفاية للتفتيش: لما
+    رسالة فشلت 3 مرات وبعدين نجحت، "ليه اتأخرت؟" مش مبين من
+    `attempts=3`. كل محاولة هنا صف، فالسبب بيتفحص فعلاً.
+
+    والأهم: **الردود الخام بتتنضّف قبل ما تتخزّن**
+    (`redact()`)، بس الحماية الحقيقية إن العمود ده
+    `String(600)` محدود — ما فيش أثر ضخم في الداتابيز لو المزوّد
+    رجّع صفحة HTML كاملة.
+
+    **مش بنخزّن نص الرسالة.** لا الـbody ولا المفتاح. السطر بيقول
+    "هل نجح الإرسال؟" من غير ما نخلّي سجل المحاولات قناة تسريب
+    لبيانات العملاء.
+    """
+
+    __tablename__ = "whatsapp_attempts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    recipient_id: Mapped[int] = mapped_column(
+        ForeignKey("campaign_recipients.id", ondelete="CASCADE"), index=True
+    )
+    campaign_id: Mapped[int] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), index=True
+    )
+    # رقم المحاولة (1-based) — بيترجم لـ`CampaignRecipient.attempts`.
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)
+    # `sent` | `failed` | `skipped` — نفس قيم `SendState`.
+    state: Mapped[str] = mapped_column(String(20), nullable=False)
+    provider_status: Mapped[Optional[str]] = mapped_column(String(60))
+    provider_message_id: Mapped[Optional[str]] = mapped_column(String(120))
+    http_status: Mapped[Optional[int]] = mapped_column(Integer)
+    # السبب المختصر — **بعد التنضيف**. معروض للأدمن.
+    error: Mapped[Optional[str]] = mapped_column(String(300))
+    # رد المزوّد المختصر بعد التنضيف، للمعاينة.
+    raw: Mapped[Optional[str]] = mapped_column(String(600))
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    recipient: Mapped[CampaignRecipient] = relationship(back_populates="attempts_log")
+
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('sent', 'failed', 'skipped')",
+            name="ck_whatsapp_attempts_state",
+        ),
+        Index("ix_whatsapp_attempts_recipient", "recipient_id", "attempt_number"),
+    )
+
+
+class WhatsAppConfigRow(Base):
+    """إعدادات واتساب القابلة للتعديل من اللوحة — **سطر واحد**.
+
+    ## ليه سطر واحد
+
+        مفيش مفهوم "أكتر من إعدادات" هنا — فيه instance واحدة. لو الجدول
+    تاني فجأة، ده معناه إما multi-tenant أو multi-instance، وكل
+    واحد فيهم تغيير في التصميم (والأمان). لحد ما ده يحصل، جدول
+    من سطر واحد أبسط بكتير من جدول مع فلاتر.
+
+    ## مفيش `api_key` هنا — وده مقصود
+
+    السر في `.env` بس (`EVOLUTION_API_KEY`). لو حطّيناه هنا كان
+    في `admin SELECT *` وbackup بياخدوا السر. **مفيش عمود
+    مفتاح خالص في الجدول ده**، و`load_config` بيقرا السر من
+    `app.config.settings` بس.
+
+    اللي الجدول بيخزّنه: إعدادات **غير حسّاسة** — تشغيل، فاصل،
+    دفعة، محاولات، ورابط المزوّد واسم الـinstance (الأدمن لازم
+    يعدّلهم من غير SSH).
+
+    القناة Master (`settings.whatsapp_enabled`) مش هنا عن قصد:
+    تشغيل المزوّد كله تغيير في السيرفر، مش زرار في اللوحة. لو
+    تقدر تشغّل المزوّد بزرار، فأي حد يعمل login يقدر يبعت
+    رسايل لعملائك.
+    """
+
+    __tablename__ = "whatsapp_config"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # القناة مقفولة افتراضياً. **double gate**: لازم `enabled` في
+    # الجدول **و** `WHATSAPP_ENABLED` في البيئة. الاتنين مقفولين
+    # افتراضياً.
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=_BOOL_FALSE
+    )
+    # الإرسال المسموح. منفصل عن `enabled` عشان تقدر تفحص الاتصال
+    # وتختبر رسالة من غير ما تفتح قناة على كل العملاء.
+    sending_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=_BOOL_FALSE
+    )
+    # رابط المزوّد واسم الـinstance — بيتoverride الـenvironment لو
+    # اتكتبوا هنا. بيتفحصوا بـ`validate_base_url` قبل أي اتصال.
+    base_url: Mapped[Optional[str]] = mapped_column(String(300))
+    instance: Mapped[Optional[str]] = mapped_column(String(120))
+    # --- إيقاع الإرسال --------------------------------------------
+    #
+    # `message_interval_ms` = الفاصل بين رسالتين. **مش ضمان** إن
+    # المزوّد مش هيحظر — مفيش فاصلة بتضمن ده. ده بس بيقلّل
+    # الضغط وبيحترم `429`.
+    message_interval_ms: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1000, server_default="1000"
+    )
+    # حجم الدفعة: عدد الرسايل قبل commit. الدفعة الكبيرة = تأخير
+    # commit = الإلغاء بيتأخر.
+    batch_size: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=20, server_default="20"
+    )
+    # محاولات **إضافية** بعد الأولى (0 = محاولة واحدة وخلاص).
+    # بتطبق على `whatsapp_attempts`، مش على `CampaignRecipient`.
+    max_retries: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=2, server_default="2"
+    )
+    updated_by_admin_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("admins.id", ondelete="SET NULL"), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
 
