@@ -1,11 +1,11 @@
 {% extends "admin/base.html" %}
 {% block content %}
 
-<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+<div class="page-header">
   <div>
-    <a href="/admin/orders" class="text-sm font-semibold text-emerald-700 hover:underline">&larr; رجوع للطلبات</a>
-    <h1 class="text-2xl font-bold">طلب #{{ order.id }}</h1>
-    <p class="text-sm text-slate-500">
+    <a href="/admin/orders" class="text-sm font-bold" style="color:var(--color-primary,#059669)">&larr; رجوع للطلبات</a>
+    <h1 class="page-title mt-1">طلب #{{ order.id }}</h1>
+    <p class="page-sub">
       {{ order.created_at.strftime("%Y-%m-%d %H:%M") }}
       &middot;
       {% if order.channel == "whatsapp" %}عبر واتساب{% elif order.channel == "system" %}من الموقع{% else %}{{ order.channel }}{% endif %}
@@ -13,16 +13,15 @@
       {{ order.branch.name if order.branch else "—" }}
     </p>
   </div>
-  <div class="rounded bg-white px-4 py-2 text-center shadow-sm">
-    <div class="text-sm font-bold">{{ status_labels.get(order.status, order.status) }}</div>
-    <div class="text-[11px] text-slate-400">حالة الطلب</div>
+  <div class="badge badge-outline" style="font-size:.85rem;padding:.6rem 1rem">
+    {{ status_labels.get(order.status, order.status) }} <span class="muted" style="font-weight:800">· حالة الطلب</span>
   </div>
 </div>
 
 {% if current_status is none %}
   {# صف بحالة V1 أو تالفة. `update_order_status` بيسمح بأي حالة جديدة
      من صف كده عشان الأدمن يصلّحه من غير تدخل في الداتابيز. #}
-  <div class="mb-4 rounded bg-amber-50 p-3 text-sm text-amber-800">
+  <div class="alert alert-warn mb-4">
     حالة الطلب دي ({{ order.status }}) مش معروفة في النظام. اختار الحالة الصح من تحت.
   </div>
 {% endif %}
@@ -30,15 +29,14 @@
 {# ===== تغيير حالة الطلب =====
    الخيارات المسموحة بس (`allowed_statuses` من `allowed_next_statuses`).
    التحقق الحقيقي في `update_order_status` — الـbuttons دي راحة للمستخدم. #}
-<div class="mb-4 rounded bg-white p-4 shadow-sm">
-  <h2 class="mb-2 text-sm font-bold">حالة الطلب</h2>
+<div class="panel p-4 mb-4">
+  <h2 class="mb-2 text-sm font-extrabold">حالة الطلب</h2>
   {% if allowed_statuses %}
     <form method="post" action="/admin/orders/{{ order.id }}/status" class="flex flex-wrap gap-2">
       {{ csrf_field(request) }}
       {% for status in allowed_statuses %}
         {% if status.value != order.status %}
-          <button name="status_value" value="{{ status.value }}"
-                  class="rounded border border-slate-300 px-3 py-1.5 text-sm font-semibold hover:bg-slate-100">
+          <button name="status_value" value="{{ status.value }}" class="btn btn-sm btn-outline">
             {{ status_labels.get(status.value, status.value) }}
           </button>
         {% endif %}
@@ -46,12 +44,12 @@
       {# صف بحالة غريبة: مفيش `allowed_statuses`، فلازم يبقى في اختيار
          حر — من غيره الأدمن مش هيقدر يصلّح الطلب. #}
       {% if current_status is none %}
-        <select name="status_value" class="rounded border px-2 py-1.5 text-sm">
+        <select name="status_value" class="select sm:max-w-xs">
           {% for status in statuses | default([]) %}
             <option value="{{ status.value }}">{{ status_labels.get(status.value, status.value) }}</option>
           {% endfor %}
         </select>
-        <button class="rounded bg-slate-900 px-4 py-1.5 text-sm font-bold text-white">حفظ</button>
+        <button class="btn btn-dark">حفظ</button>
       {% endif %}
     </form>
   {% else %}
@@ -59,19 +57,18 @@
   {% endif %}
 </div>
 
-<div class="mb-4 grid gap-4 lg:grid-cols-2">
-
+<div class="cols cols-2 mb-4">
   {# ===== العميل والتوصيل ===== #}
-  <div class="rounded bg-white p-4 shadow-sm">
-    <h2 class="mb-3 text-sm font-bold">العميل</h2>
+  <div class="panel p-4">
+    <h2 class="panel-title mb-3">العميل</h2>
     <dl class="space-y-1.5 text-sm">
       <div class="flex justify-between gap-3">
         <dt class="text-slate-500">الاسم</dt>
-        <dd class="font-semibold">{{ order.customer_name }}</dd>
+        <dd class="font-extrabold">{{ order.customer_name }}</dd>
       </div>
       <div class="flex justify-between gap-3">
         <dt class="text-slate-500">الهاتف</dt>
-        <dd><a class="font-semibold text-emerald-700" href="tel:{{ order.customer_phone }}" dir="ltr">{{ order.customer_phone }}</a></dd>
+        <dd><a class="font-extrabold" style="color:var(--color-primary,#059669)" href="tel:{{ order.customer_phone }}" dir="ltr">{{ order.customer_phone }}</a></dd>
       </div>
       <div class="flex justify-between gap-3">
         <dt class="text-slate-500">العنوان</dt>
@@ -110,21 +107,21 @@
   {# ===== الدفع =====
      حالة الدفع منفصلة عن حالة الطلب: طلب كاش لسه ما اتدفعش =
      `preparing` + `pending`. كل واحدة في مسارها. #}
-  <div class="rounded bg-white p-4 shadow-sm">
-    <h2 class="mb-3 text-sm font-bold">الدفع</h2>
+  <div class="panel p-4">
+    <h2 class="panel-title mb-3">الدفع</h2>
     <dl class="mb-3 space-y-1.5 text-sm">
       <div class="flex justify-between gap-3">
         <dt class="text-slate-500">الطريقة</dt>
-        <dd class="font-semibold">{{ order.payment_method_label or order.payment_method or "—" }}</dd>
+        <dd class="font-extrabold">{{ order.payment_method_label or order.payment_method or "—" }}</dd>
       </div>
       <div class="flex justify-between gap-3">
         <dt class="text-slate-500">الحالة</dt>
         <dd>
-          <span class="rounded-full px-2 py-0.5 text-xs font-bold
-            {% if order.payment_status == 'paid' %}bg-emerald-100 text-emerald-800
-            {% elif order.payment_status == 'failed' %}bg-red-100 text-red-800
-            {% elif order.payment_status == 'confirmed' %}bg-blue-100 text-blue-800
-            {% else %}bg-slate-100 text-slate-700{% endif %}">
+          <span class="badge
+            {% if order.payment_status == 'paid' %}badge-green
+            {% elif order.payment_status == 'failed' %}badge-red
+            {% elif order.payment_status == 'confirmed' %}badge-blue
+            {% else %}badge-slate{% endif %}">
             {{ payment_status_labels.get(order.payment_status, order.payment_status) }}
           </span>
         </dd>
@@ -143,8 +140,6 @@
       {% endif %}
     </dl>
 
-    {# تعليمات الطريقة اتخزنت snapshot مع الطلب (من `description` وقت
-       الطلب). عرضها هنا عشان الموظف يعرف يقول للعميل رقم فين بالظبط. #}
     {% if order.payment_instructions %}
       <div class="mb-3 whitespace-pre-line rounded bg-slate-50 p-2.5 text-xs text-slate-600">{{ order.payment_instructions }}</div>
     {% endif %}
@@ -152,20 +147,20 @@
     <form method="post" action="/admin/orders/{{ order.id }}/payment" class="space-y-2">
       {{ csrf_field(request) }}
       <div class="flex flex-wrap items-end gap-2">
-        <label class="flex-1 text-xs font-semibold">
+        <label class="flex-1 text-xs font-extrabold">
           حالة الدفع
-          <select name="payment_status" class="mt-1 w-full rounded border px-2 py-1.5 text-sm">
+          <select name="payment_status" class="select mt-1">
             {% for value, label in payment_status_labels.items() %}
               <option value="{{ value }}" {% if order.payment_status == value %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
         </label>
-        <label class="flex-1 text-xs font-semibold">
+        <label class="flex-1 text-xs font-extrabold">
           مرجع (اختياري)
           <input type="text" name="payment_reference" value="{{ order.payment_reference or '' }}" maxlength="100"
-                 placeholder="رقم عملية / رقم حوالة" class="mt-1 w-full rounded border px-2 py-1.5 text-sm">
+                 placeholder="رقم عملية / رقم حوالة" class="input mt-1">
         </label>
-        <button class="rounded bg-emerald-700 px-4 py-1.5 text-sm font-bold text-white">حفظ</button>
+        <button class="btn btn-primary">حفظ</button>
       </div>
     </form>
   </div>
@@ -174,77 +169,80 @@
 {# ===== رسوم التوصيل المعلّقة (call_center) =====
    الطلب اتسجّل من غير رسوم، والأدمن هو اللي بيحدّدها. #}
 {% if order.delivery_fee_pending %}
-  <div class="mb-4 rounded bg-amber-50 p-4 shadow-sm">
-    <h2 class="mb-1 text-sm font-bold text-amber-900">رسوم التوصيل لسه متحددةش</h2>
-    <p class="mb-3 text-xs text-amber-800">
-      الطلب ده تم استلامه من غير رسوم. حددها هنا والإجمالي هيتحسب تاني — والمبلغ النهائي اللي هيشوفه
-      العميل على صفحة التتبّع هيتحدّث مع كل تغيير.
-    </p>
-    <form method="post" action="/admin/orders/{{ order.id }}/delivery-fee" class="flex flex-wrap items-end gap-2">
-      {{ csrf_field(request) }}
-      <label class="text-xs font-semibold">
-        رسوم التوصيل ({{ settings.currency }})
-        <input type="number" name="delivery_fee" value="{{ order.delivery_fee }}" min="0" step="0.01" required
-               class="mt-1 w-32 rounded border px-2 py-1.5 text-sm">
-      </label>
-      <button class="rounded bg-emerald-700 px-4 py-1.5 text-sm font-bold text-white">تحديد الرسوم</button>
-    </form>
+  <div class="alert alert-warn mb-4">
+    <span>
+      <strong>رسوم التوصيل لسه متحددةش.</strong>
+      <div class="mt-1 text-xs">
+        الطلب ده تم استلامه من غير رسوم. حددها هنا والإجمالي هيتحسب تاني — والمبلغ النهائي
+        اللي هيشوفه العميل على صفحة التتبّع هيتحدّث مع كل تغيير.
+      </div>
+      <form method="post" action="/admin/orders/{{ order.id }}/delivery-fee" class="mt-2 flex flex-wrap items-end gap-2">
+        {{ csrf_field(request) }}
+        <label class="text-xs font-extrabold">
+          رسوم التوصيل ({{ settings.currency }})
+          <input type="number" name="delivery_fee" value="{{ order.delivery_fee }}" min="0" step="0.01" required class="input" style="width:9rem">
+        </label>
+        <button class="btn btn-primary btn-sm">تحديد الرسوم</button>
+      </form>
+    </span>
   </div>
 {% endif %}
 
 {# ===== الأصناف ===== #}
-<div class="mb-4 overflow-x-auto rounded bg-white shadow-sm">
-  <table class="w-full min-w-[640px] text-sm">
-    <thead class="bg-slate-100 text-right">
-      <tr><th class="p-3">الصنف</th><th class="p-3">الكمية</th><th class="p-3">سعر الوحدة</th><th class="p-3">الإجمالي</th></tr>
-    </thead>
-    <tbody>
-      {% for item in order.items %}
-        <tr class="border-t align-top">
-          <td class="p-3">
-            <div class="font-semibold">{{ item.product_name }}</div>
-            {% if item.options %}
-              <div class="text-xs text-indigo-600">
-                {% for opt in item.options %}{{ opt.group_name ~ ": " if opt.group_name }}{{ opt.name }} (+{{ subtotal_label(opt.price_adjustment) }}){% if not loop.last %}, {% endif %}{% endfor %}
-              </div>
-            {% endif %}
-            {% if item.addons %}
-              <div class="text-xs text-slate-500">
-                {% for addon in item.addons %}+ {{ addon.name }} ({{ subtotal_label(addon.price) }}){% if not loop.last %}, {% endif %}{% endfor %}
-              </div>
-            {% endif %}
-            {% if item.item_note %}
-              <div class="mt-1 text-xs text-amber-700">ملاحظة: {{ item.item_note }}</div>
-            {% endif %}
-          </td>
-          <td class="p-3">{{ item.quantity }}</td>
-          <td class="p-3">{{ subtotal_label(item.unit_price) }}</td>
-          <td class="p-3 font-bold">{{ subtotal_label(item.line_total) }}</td>
-        </tr>
-      {% else %}
-        <tr><td class="p-4 text-center text-slate-500" colspan="4">مفيش أصناف</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="table-panel mb-4">
+  <div class="table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr><th>الصنف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr>
+      </thead>
+      <tbody>
+        {% for item in order.items %}
+          <tr>
+            <td>
+              <span class="cell-main">{{ item.product_name }}</span>
+              {% if item.options %}
+                <div class="cell-sub" style="color:rgb(79 70 229)">
+                  {% for opt in item.options %}{{ opt.group_name ~ ": " if opt.group_name }}{{ opt.name }} (+{{ subtotal_label(opt.price_adjustment) }}){% if not loop.last %}, {% endif %}{% endfor %}
+                </div>
+              {% endif %}
+              {% if item.addons %}
+                <div class="cell-sub">
+                  {% for addon in item.addons %}+ {{ addon.name }} ({{ subtotal_label(addon.price) }}){% if not loop.last %}, {% endif %}{% endfor %}
+                </div>
+              {% endif %}
+              {% if item.item_note %}
+                <div class="cell-sub" style="color:rgb(180 83 9)">ملاحظة: {{ item.item_note }}</div>
+              {% endif %}
+            </td>
+            <td class="cell-main">{{ item.quantity }}</td>
+            <td class="num">{{ subtotal_label(item.unit_price) }}</td>
+            <td class="cell-main num">{{ subtotal_label(item.line_total) }}</td>
+          </tr>
+        {% else %}
+          <tr><td class="p-4 text-center text-slate-500" colspan="4">مفيش أصناف</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 {# ===== الحساب =====
    الحساب المعروض هنا (subtotal/discount/fee/total) هو نفسه اللي اتخزّن
    وقت الإنشاء. `set_order_delivery_fee` بيحسب `total` تاني من نفس
    البنود، فالرقمين بيفضلوا متوافقين. #}
-<div class="rounded bg-white p-4 shadow-sm">
-  <h2 class="mb-3 text-sm font-bold">الحساب</h2>
+<div class="panel p-4">
+  <h2 class="panel-title mb-3">الحساب</h2>
   <dl class="max-w-sm space-y-1.5 text-sm">
-    <div class="flex justify-between gap-3"><dt class="text-slate-500">الإجمالي الفرعي</dt><dd>{{ subtotal_label(order.subtotal) }} {{ settings.currency }}</dd></div>
+    <div class="flex justify-between gap-3"><dt class="text-slate-500">الإجمالي الفرعي</dt><dd class="num">{{ subtotal_label(order.subtotal) }} {{ settings.currency }}</dd></div>
     {% if order.discount_amount %}
-      <div class="flex justify-between gap-3 text-emerald-700">
+      <div class="flex justify-between gap-3" style="color:var(--color-primary,#059669)">
         <dt>الخصم{% if order.coupon %} ({{ order.coupon.code }}){% endif %}</dt>
-        <dd>-{{ subtotal_label(order.discount_amount) }}</dd>
+        <dd class="num">-{{ subtotal_label(order.discount_amount) }}</dd>
       </div>
     {% endif %}
     <div class="flex justify-between gap-3">
       <dt class="text-slate-500">رسوم التوصيل</dt>
-      <dd>
+      <dd class="num">
         {% if order.delivery_fee_pending %}
           <span class="font-bold text-amber-700">هتحدد من المطعم</span>
         {% else %}
@@ -252,8 +250,8 @@
         {% endif %}
       </dd>
     </div>
-    <div class="flex justify-between gap-3 border-t border-slate-200 pt-1.5 text-base font-extrabold text-emerald-700">
-      <dt>الإجمالي</dt><dd>{{ subtotal_label(order.total) }} {{ settings.currency }}</dd>
+    <div class="flex justify-between gap-3 border-t border-slate-200 pt-1.5 text-base font-extrabold" style="color:var(--color-primary,#059669)">
+      <dt>الإجمالي</dt><dd class="num">{{ subtotal_label(order.total) }} {{ settings.currency }}</dd>
     </div>
   </dl>
 </div>

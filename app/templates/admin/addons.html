@@ -1,35 +1,69 @@
 {% extends "admin/base.html" %}
 {% block content %}
-<h1 class="mb-5 text-2xl font-bold">إضافات "{{ product.name }}"</h1>
+<div class="page-header">
+  <div>
+    <h1 class="page-title">إضافات "{{ product.name }}"</h1>
+    <p class="page-sub">إضافات بزيادة سعر ثابت على أي طلب للمنتج.</p>
+  </div>
+  <a href="/admin/products" class="btn btn-outline btn-sm">← العودة للمنتجات</a>
+</div>
 
-<form method="post" action="/admin/products/{{ product.id }}/addons" class="mb-6 grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-4">
+<form method="post" action="/admin/products/{{ product.id }}/addons" class="panel p-4 sm:p-6 mb-6 cols" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
   {{ csrf_field(request) }}
-  <input name="name" required class="rounded border px-3 py-2 md:col-span-2" placeholder="اسم الإضافة">
-  <input name="price" type="number" step="0.01" min="0" required class="rounded border px-3 py-2" placeholder="السعر">
-  <input name="sort_order" type="number" value="0" class="rounded border px-3 py-2" placeholder="الترتيب">
-  <label class="flex items-center gap-2"><input name="is_active" type="checkbox" value="true" checked> نشط</label>
-  <button class="rounded bg-slate-900 px-4 py-2 font-bold text-white md:col-span-4">إضافة إضافة</button>
+  <div class="field-group mb-0">
+    <label class="label" for="ad-name">اسم الإضافة</label>
+    <input id="ad-name" name="name" required class="input" placeholder="اسم الإضافة">
+  </div>
+  <div class="field-group mb-0">
+    <label class="label" for="ad-price">السعر</label>
+    <input id="ad-price" name="price" type="number" step="0.01" min="0" required class="input" placeholder="السعر">
+  </div>
+  <div class="field-group mb-0">
+    <label class="label" for="ad-sort">الترتيب</label>
+    <input id="ad-sort" name="sort_order" type="number" value="0" class="input" placeholder="الترتيب">
+  </div>
+  <div class="field-group mb-0 flex items-end pb-1">
+    <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)"><input name="is_active" type="checkbox" value="true" checked> نشط</label>
+  </div>
+  <button class="btn btn-primary" style="grid-column:1/-1">إضافة إضافة</button>
 </form>
 
+{% if addons %}
 <div class="space-y-3">
   {% for addon in addons %}
-    <form method="post" action="/admin/products/{{ product.id }}/addons" class="grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-4">
+    <form method="post" action="/admin/products/{{ product.id }}/addons" class="panel p-4">
       {{ csrf_field(request) }}
       <input type="hidden" name="id" value="{{ addon.id }}">
-      <input name="name" value="{{ addon.name }}" required class="rounded border px-3 py-2 md:col-span-2" placeholder="اسم الإضافة">
-      <input name="price" type="number" step="0.01" min="0" value="{{ addon.price }}" required class="rounded border px-3 py-2" placeholder="السعر">
-      <input name="sort_order" type="number" value="{{ addon.sort_order }}" class="rounded border px-3 py-2" placeholder="الترتيب">
-      <label class="flex items-center gap-2"><input name="is_active" type="checkbox" value="true" {% if addon.is_active %}checked{% endif %}> نشط</label>
-      <button class="rounded bg-emerald-700 px-4 py-2 text-white md:col-span-4">حفظ</button>
-      <button form="delete-addon-{{ addon.id }}" class="rounded bg-red-600 px-4 py-2 text-white md:col-span-4">حذف</button>
+      <div class="flex flex-wrap items-end gap-3">
+        <div class="field-group mb-0 flex-1" style="min-width:12rem">
+          <label class="label" for="ad-name-{{ addon.id }}">اسم الإضافة</label>
+          <input id="ad-name-{{ addon.id }}" name="name" value="{{ addon.name }}" required class="input" placeholder="اسم الإضافة">
+        </div>
+        <div class="field-group mb-0">
+          <label class="label" for="ad-price-{{ addon.id }}">السعر</label>
+          <input id="ad-price-{{ addon.id }}" name="price" type="number" step="0.01" min="0" value="{{ addon.price }}" required class="input" style="width:8rem" placeholder="السعر">
+        </div>
+        <div class="field-group mb-0">
+          <label class="label" for="ad-sort-{{ addon.id }}">الترتيب</label>
+          <input id="ad-sort-{{ addon.id }}" name="sort_order" type="number" value="{{ addon.sort_order }}" class="input" style="width:6rem" placeholder="الترتيب">
+        </div>
+        <div class="field-group mb-0 flex items-end pb-1">
+          <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)"><input name="is_active" type="checkbox" value="true" {% if addon.is_active %}checked{% endif %}> نشط</label>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button class="btn btn-primary btn-sm">حفظ</button>
+          <button form="delete-addon-{{ addon.id }}" class="btn btn-danger btn-sm">حذف</button>
+        </div>
+      </div>
     </form>
-    <form id="delete-addon-{{ addon.id }}" method="post" action="/admin/products/{{ product.id }}/addons/{{ addon.id }}/delete">{{ csrf_field(request) }}</form>
-  {% else %}
-    <p class="text-sm text-slate-500">لا توجد إضافات بعد لهذا المنتج.</p>
+    <form id="delete-addon-{{ addon.id }}" method="post" action="/admin/products/{{ product.id }}/addons/{{ addon.id }}/delete" class="hidden">{{ csrf_field(request) }}</form>
   {% endfor %}
 </div>
-
-<div class="mt-4">
-  <a href="/admin/products" class="text-sm text-slate-600 hover:text-primary">← العودة للمنتجات</a>
-</div>
+{% else %}
+  <div class="empty-state panel">
+    <span class="empty-icon" aria-hidden="true">➕</span>
+    <p class="empty-title">لا توجد إضافات بعد لهذا المنتج</p>
+    <p class="empty-text">أضف أول إضافة من فوق.</p>
+  </div>
+{% endif %}
 {% endblock %}

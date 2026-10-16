@@ -1,76 +1,79 @@
-<div class="overflow-x-auto rounded bg-white shadow-sm">
-  <table class="w-full min-w-[760px] text-sm">
-    <thead class="bg-slate-100 text-right">
-      <tr>
-        <th class="p-3">#</th><th class="p-3">العميل</th><th class="p-3">الهاتف</th><th class="p-3">الفرع</th><th class="p-3">الإجمالي</th><th class="p-3">الحالة</th><th class="p-3">التاريخ</th><th class="p-3">المنتجات</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for order in orders or latest_orders %}
-        <tr class="border-t align-top">
-          <td class="p-3">{{ order.id }}</td>
-          <td class="p-3">{{ order.customer_name }}<br><span class="text-slate-500">{{ order.customer_address or "استلام من المطعم" }}</span>
-            {% if order.delivery_option %}<div class="text-xs text-indigo-600">{{ order.delivery_option.name }}</div>{% endif %}
-            {% if order.payment_method %}<div class="text-xs text-emerald-700">الدفع: {{ payment_labels.get(order.payment_method, order.payment_method) }}</div>{% endif %}
-            {% if order.pickup_time %}<div class="text-xs text-slate-500">موعد: {{ order.pickup_time.strftime("%Y-%m-%d %H:%M") }}</div>{% endif %}
-            {% if order.coupon %}<div class="text-xs text-emerald-700">كوبون: {{ order.coupon.code }}</div>{% endif %}
-          </td>
-          <td class="p-3">{{ order.customer_phone }}</td>
-          <td class="p-3">
-            {{ order.branch.name if order.branch else "—" }}
-            <div class="text-[11px] text-slate-400">
-              {% if order.channel == "whatsapp" %}عبر واتساب{% elif order.channel == "system" %}من الموقع{% else %}{{ order.channel }}{% endif %}
-            </div>
-          </td>
-          <td class="p-3">
-            <div class="font-bold">{{ order.total }}</div>
-            <div class="text-[11px] text-slate-400">فرعي {{ order.subtotal }}{% if order.discount_amount %} - خصم {{ order.discount_amount }}{% endif %}{% if order.delivery_fee %} + توصيل {{ order.delivery_fee }}{% endif %}</div>
-          </td>
-          <td class="p-3">
-            {# الحالات المسموح بيها من الحالة الحالية بس — الباقي
-               بيرمي 400 في `update_order_status`. نعرض الخطوة الجاية
-               كـbutton لأن الموظف بيكمل الرحلة، مش بيفكّر في كل
-               الحالات. #}
-            <div class="flex flex-wrap gap-1.5">
-              {% for value in (allowed_by_order | default({})).get(order.id, []) %}
-                {% if value != order.status %}
-                  <form method="post" action="/admin/orders/{{ order.id }}/status">
-                    {{ csrf_field(request) }}
-                    <input type="hidden" name="status_value" value="{{ value }}">
-                    <button class="rounded border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100">
-                      {{ status_labels.get(value, value) }}
-                    </button>
-                  </form>
-                {% endif %}
-              {% endfor %}
-            </div>
-            <div class="mt-1 font-bold text-slate-800">{{ status_labels.get(order.status, order.status) }}</div>
-            <a class="text-xs text-emerald-700 hover:underline" href="/admin/orders/{{ order.id }}">تفاصيل</a>
-          </td>
-          <td class="p-3">{{ order.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
-          <td class="p-3">
-            {% for item in order.items %}
-              <div>{{ item.product_name }} x {{ item.quantity }}
-                {% if item.options %}
-                  <div class="text-xs text-indigo-600">
-                    {% for opt in item.options %}{{ opt.group_name ~ ": " if opt.group_name }}{{ opt.name }} (+{{ opt.price_adjustment }}){% if not loop.last %}, {% endif %}{% endfor %}
-                  </div>
-                {% endif %}
-                {% if item.addons %}
-                  <div class="text-xs text-slate-500">
-                    {% for addon in item.addons %}+ {{ addon.name }} ({{ addon.price }}){% if not loop.last %}, {% endif %}{% endfor %}
-                  </div>
-                {% endif %}
-                {% if item.item_note %}
-                  <div class="text-xs text-amber-700">📝 {{ item.item_note }}</div>
-                {% endif %}
-              </div>
-            {% endfor %}
-          </td>
+<div class="table-panel">
+  <div class="table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>#</th><th>العميل</th><th>الهاتف</th><th>الفرع</th><th>الإجمالي</th><th>الحالة</th><th>التاريخ</th><th>المنتجات</th>
         </tr>
-      {% else %}
-        <tr><td class="p-4 text-center text-slate-500" colspan="8">لا توجد طلبات</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {% for order in orders or latest_orders %}
+          <tr>
+            <td class="cell-main">{{ order.id }}</td>
+            <td>
+              {{ order.customer_name }}
+              <div class="cell-sub">{{ order.customer_address or "استلام من المطعم" }}</div>
+              {% if order.delivery_option %}<div class="cell-sub" style="color:rgb(79 70 229)">{{ order.delivery_option.name }}</div>{% endif %}
+              {% if order.payment_method %}<div class="cell-sub" style="color:var(--color-primary,#059669)">الدفع: {{ payment_labels.get(order.payment_method, order.payment_method) }}</div>{% endif %}
+              {% if order.pickup_time %}<div class="cell-sub">موعد: {{ order.pickup_time.strftime("%Y-%m-%d %H:%M") }}</div>{% endif %}
+              {% if order.coupon %}<div class="cell-sub" style="color:var(--color-primary,#059669)">كوبون: {{ order.coupon.code }}</div>{% endif %}
+            </td>
+            <td class="cell-sub" dir="ltr">{{ order.customer_phone }}</td>
+            <td>
+              <span class="cell-main">{{ order.branch.name if order.branch else "—" }}</span>
+              <div class="cell-sub">
+                {% if order.channel == "whatsapp" %}عبر واتساب{% elif order.channel == "system" %}من الموقع{% else %}{{ order.channel }}{% endif %}
+              </div>
+            </td>
+            <td>
+              <div class="cell-main num">{{ order.total }}</div>
+              <div class="cell-sub">فرعي {{ order.subtotal }}{% if order.discount_amount %} - خصم {{ order.discount_amount }}{% endif %}{% if order.delivery_fee %} + توصيل {{ order.delivery_fee }}{% endif %}</div>
+            </td>
+            <td>
+              {# الحالات المسموح بيها من الحالة الحالية بس — الباقي
+                 بيرمي 400 في `update_order_status`. نعرض الخطوة الجاية
+                 كـbutton لأن الموظف بيكمل الرحلة، مش بيفكّر في كل
+                 الحالات. #}
+              <div class="flex flex-wrap gap-1.5">
+                {% for value in (allowed_by_order | default({})).get(order.id, []) %}
+                  {% if value != order.status %}
+                    <form method="post" action="/admin/orders/{{ order.id }}/status">
+                      {{ csrf_field(request) }}
+                      <input type="hidden" name="status_value" value="{{ value }}">
+                      <button class="btn btn-sm btn-outline">{{ status_labels.get(value, value) }}</button>
+                    </form>
+                  {% endif %}
+                {% endfor %}
+              </div>
+              <div class="mt-1 badge badge-slate">{{ status_labels.get(order.status, order.status) }}</div>
+              <a class="mt-1 block text-xs font-bold" style="color:var(--color-primary,#059669)" href="/admin/orders/{{ order.id }}">تفاصيل ←</a>
+            </td>
+            <td class="cell-sub" style="white-space:nowrap">{{ order.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+            <td>
+              {% for item in order.items %}
+                <div class="mb-1">
+                  <span class="cell-main">{{ item.product_name }} x {{ item.quantity }}</span>
+                  {% if item.options %}
+                    <div class="cell-sub" style="color:rgb(79 70 229)">
+                      {% for opt in item.options %}{{ opt.group_name ~ ": " if opt.group_name }}{{ opt.name }} (+{{ opt.price_adjustment }}){% if not loop.last %}, {% endif %}{% endfor %}
+                    </div>
+                  {% endif %}
+                  {% if item.addons %}
+                    <div class="cell-sub">
+                      {% for addon in item.addons %}+ {{ addon.name }} ({{ addon.price }}){% if not loop.last %}, {% endif %}{% endfor %}
+                    </div>
+                  {% endif %}
+                  {% if item.item_note %}
+                    <div class="cell-sub" style="color:rgb(180 83 9)">📝 {{ item.item_note }}</div>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td class="p-4 text-center text-slate-500" colspan="8">لا توجد طلبات</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>

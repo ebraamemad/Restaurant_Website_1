@@ -1,189 +1,192 @@
 {% extends "admin/base.html" %}
 {% block content %}
 
-{# ===== معاينة الجمهور ===== #}
-{# أهم شاشة في القسم. الأدمن بيشوف **الأرقام والعينات** قبل ما يكتب
+{# ===== معاينة الجمهور =====
+   أهم شاشة في القسم. الأدمن بيشوف **الأرقام والعينات** قبل ما يكتب
    كلمة واحدة في الرسالة. من غيرها، زر "إرسال" رمي في الظلام. #}
-<div class="flex flex-wrap items-center justify-between gap-3">
-  <h1 class="text-xl font-extrabold sm:text-2xl">معاينة الجمهور</h1>
-  <a href="/admin/marketing" class="text-sm font-bold text-emerald-700 hover:underline">رجوع للوحة</a>
+<div class="page-header">
+  <div>
+    <h1 class="page-title">معاينة الجمهور</h1>
+    <p class="page-sub">{{ result.segment_label if result else 'شوف مين هيوصله العرض قبل ما تكتب حاجة.' }}</p>
+  </div>
+  <a href="/admin/marketing" class="btn btn-outline btn-sm">رجوع للوحة</a>
 </div>
 
 {% if error_message %}
-<div class="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-800">
-  {{ error_message }}
-</div>
+<div class="alert alert-danger mb-4">{{ error_message }}</div>
 {% endif %}
 
 {% if result %}
 
 {# ----- الأرقام ----- #}
-<div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-  <div class="rounded-2xl border border-slate-200 bg-white p-4">
-    <div class="text-xs font-bold text-slate-500">الجمهور</div>
-    <div class="mt-1 text-3xl font-extrabold">{{ result.stats.total }}</div>
+<div class="cols cols-2 cols-4">
+  <div class="stat-card">
+    <span class="stat-label">الجمهور</span>
+    <span class="stat-value">{{ result.stats.total }}</span>
+    <span class="stat-note">إجمالي العملاء في الاختيار ده</span>
   </div>
-  <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-    <div class="text-xs font-bold text-emerald-800">هيتقبلوا الإشعار</div>
+  <div class="stat-card">
+    <span class="stat-label">هيوصله الإشعار</span>
     {# `recipients` = اللي عندهم اشتراك شغّال **و** ما رفضوش. ده
        الرقم اللي الإرسال هيبعت لحد بالظبط. #}
-    <div class="mt-1 text-3xl font-extrabold text-emerald-700">{{ result.stats.recipients }}</div>
+    <span class="stat-value" style="color:var(--color-primary,#059669)">{{ result.stats.recipients }}</span>
   </div>
-  <div class="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-    <div class="text-xs font-bold text-amber-800">رافضين العروض</div>
-    <div class="mt-1 text-3xl font-extrabold text-amber-700">{{ result.stats.opted_out }}</div>
-    <div class="mt-1 text-xs text-amber-800">مش هيتبعت لهم خالص</div>
+  <div class="stat-card">
+    <span class="stat-label">رافضين العروض</span>
+    <span class="stat-value" style="color:rgb(217 119 6)">{{ result.stats.opted_out }}</span>
+    <span class="stat-note">مش هيتبعت لهم خالص</span>
   </div>
-  <div class="rounded-2xl border border-slate-200 bg-white p-4">
-    <div class="text-xs font-bold text-slate-500">من غير إشعار</div>
-    <div class="mt-1 text-3xl font-extrabold text-slate-700">{{ result.stats.no_subscription }}</div>
-    <div class="mt-1 text-xs text-slate-500">مش هيوصلهم الإشعار</div>
+  <div class="stat-card">
+    <span class="stat-label">من غير إشعار شغّال</span>
+    <span class="stat-value" style="color:rgb(100 116 139)">{{ result.stats.no_subscription }}</span>
+    <span class="stat-note">ما طلبش إشعار على جهاز — مش هيوصلهم</span>
   </div>
 </div>
 
 {# ----- تحذير القناة ----- #}
 {% if result.warning %}
-<div class="mt-4 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm font-bold text-amber-900">
-  {{ result.warning }}
-</div>
+<div class="alert alert-warn mt-4"><span>⚠ {{ result.warning }}</span></div>
 {% endif %}
 
 {# ----- عينات ----- #}
 {# الـ5 عينات دي مش تجميل: الأدمن بيشوف بعينه اللي هيتبعت له.
    رقم مكرر في الملف أو اسم غريب بيبان هنا قبل ما يتقرّر. #}
-<div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-  <h2 class="font-extrabold">عيّنة من {{ result.segment_label }}</h2>
+<div class="table-panel mt-4">
+  <div class="panel-head">
+    <h2 class="panel-title">عيّنة من {{ result.segment_label }}</h2>
+  </div>
   {% if result.samples %}
-  <div class="mt-3 overflow-x-auto">
-    <table class="w-full text-sm">
+  <div class="table-wrap">
+    <table class="admin-table">
       <thead>
-        <tr class="border-b border-slate-200 text-right text-xs font-bold text-slate-500">
-          <th class="py-2">الاسم</th>
-          <th class="py-2">التليفون</th>
-          <th class="py-2">الطلبات</th>
-          <th class="py-2">إجمالي الإنفاق</th>
+        <tr>
+          <th>الاسم</th>
+          <th>التليفون</th>
+          <th>الطلبات</th>
+          <th>إجمالي الإنفاق</th>
         </tr>
       </thead>
-      <tbody class="divide-y divide-slate-100">
+      <tbody>
         {% for name, phone, orders, spent in result.samples %}
         <tr>
-          <td class="py-2 font-semibold">{{ name }}</td>
-          <td class="py-2 text-slate-600" dir="ltr">{{ phone }}</td>
-          <td class="py-2 text-slate-600">{{ orders }}</td>
-          <td class="py-2 text-slate-600">{{ spent }}</td>
+          <td class="cell-main">{{ name }}</td>
+          <td class="cell-sub" dir="ltr">{{ phone }}</td>
+          <td>{{ orders }}</td>
+          <td class="num">{{ spent }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-  <p class="mt-2 text-xs text-slate-500">
-    أول 5 عملاء بس. العدد الحقيقي هو اللي فوق.
-  </p>
+  <p class="px-5 py-3 text-xs text-slate-500">أول 5 عملاء بس. العدد الحقيقي هو اللي فوق.</p>
   {% else %}
-  <p class="mt-3 text-sm text-slate-500">مفيش عملاء في الشريحة دي. جرّب شريحة أوسع.</p>
+  <div class="empty-state">
+    <span class="empty-icon" aria-hidden="true">👥</span>
+    <p class="empty-title">مفيش عملاء في الشريحة دي</p>
+    <p class="empty-text">جرّب شريحة أوسع من تحت، أو وسّع المعايير.</p>
+  </div>
   {% endif %}
 </div>
 
 {# ----- الخطوة الجاية ----- #}
 {# `disabled` على الزرار لو مفيش حد هيتقبل. من غير `disabled` الأدمن
    بيضغط "إرسال" والـbackend بيرجّع 0 مرسل — أحسن يرفض من دوسة. #}
-<div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-  <h2 class="font-extrabold">جاهز تبعت؟</h2>
-  {% if result.stats.recipients > 0 and result.executable %}
-  <p class="mt-1 text-sm text-slate-600">
-    هيتبعت <strong>{{ result.stats.recipients }}</strong> إشعار. مفيش way ترجّع —
-    بس تقدر تلغي الحملة وهي لسه مجدولة.
-  </p>
-  <div class="mt-3 flex flex-wrap gap-2">
-    <a href="/admin/marketing/campaigns/new?audience_type={{ audience_type }}{% if segment_key %}&amp;segment_key={{ segment_key }}{% endif %}&amp;channel={{ channel }}&amp;recently_active_days={{ params.recently_active_days }}&amp;inactive_days={{ params.inactive_days }}&amp;high_spending_minimum={{ params.high_spending_minimum }}"
-       class="rounded-full bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700">
-      اكتب الحملة على {{ result.stats.recipients }} عميل
-    </a>
-    <a href="/admin/marketing"
-       class="rounded-full border border-slate-300 px-4 py-2 text-sm font-bold transition hover:bg-slate-50">
-      اختيار شريحة تانية
-    </a>
-  </div>
-  {% else %}
-  <p class="mt-1 text-sm text-slate-600">
-    {% if result.stats.recipients == 0 %}
-      مفيش حد هيتقبل الإشعار في الشريحة دي — إما كلهم رفضوا العروض أو
-      كلهم مالهمش اشتراك إشعار شغّال.
+<div class="panel mt-4">
+  <div class="panel-body">
+    <h2 class="text-lg font-extrabold">جاهز تكمّل؟</h2>
+    {% if result.stats.recipients > 0 and result.executable %}
+    <p class="mt-1 text-sm text-slate-600">
+      هيتبعت <strong>{{ result.stats.recipients }}</strong> رسالة. مفيش way ترجّع —
+      بس تقدر تلغي الحملة وهي لسه مجدولة.
+    </p>
+    <div class="mt-3 flex flex-wrap gap-2">
+      <a href="/admin/marketing/campaigns/new?audience_type={{ audience_type }}{% if segment_key %}&amp;segment_key={{ segment_key }}{% endif %}&amp;channel={{ channel }}&amp;recently_active_days={{ params.recently_active_days }}&amp;inactive_days={{ params.inactive_days }}&amp;high_spending_minimum={{ params.high_spending_minimum }}"
+         class="btn btn-primary">اكتب الحملة على {{ result.stats.recipients }} عميل</a>
+      <a href="/admin/marketing" class="btn btn-outline">اختار شريحة تانية</a>
+    </div>
     {% else %}
-      القناة دي مش متنفّذة لسه، فمفيش زر إرسال.
+    <p class="mt-1 text-sm text-slate-600">
+      {% if result.stats.recipients == 0 %}
+        مفيش حد هيوصله الإشعار في الشريحة دي — إما كلهم رفضوا العروض
+        أو كلهم مالهمش اشتراك إشعار شغّال.
+      {% else %}
+        القناة دي مش متنفّذة لسه، فمفيش زر إرسال.
+      {% endif %}
+    </p>
     {% endif %}
-  </p>
-  {% endif %}
+  </div>
 </div>
 
 {% endif %}
 
 {# ----- نموذج المعاينة ----- #}
-<div class="mt-6 rounded-2xl border border-slate-200 bg-white p-4">
-  <h2 class="font-extrabold">جرب شريحة تانية</h2>
-  <form method="post" action="/admin/marketing/preview" class="mt-3 grid gap-3 sm:grid-cols-2">
-    {{ csrf_field(request) }}
-    <label class="block">
-      <span class="text-xs font-bold text-slate-600">نوع الجمهور</span>
-      <select name="audience_type" id="audience-type"
-              class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-        <option value="all" {% if audience_type == 'all' %}selected{% endif %}>كل العملاء</option>
-        <option value="segment" {% if audience_type == 'segment' %}selected{% endif %}>شريحة</option>
-        <option value="imported" {% if audience_type == 'imported' %}selected{% endif %}>عملاء مستوردين</option>
-      </select>
-    </label>
-    <label class="block" id="segment-field">
-      <span class="text-xs font-bold text-slate-600">الشريحة</span>
-      <select name="segment_key"
-              class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-        {% for seg in segments() %}
-        <option value="{{ seg.key }}" {% if segment_key == seg.key %}selected{% endif %}>{{ seg.label }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="block">
-      <span class="text-xs font-bold text-slate-600">القناة</span>
-      <select name="channel" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-        {# `whatsapp` و`both` **موجودين بس مش منفّذين**. بنعرضهم
-           معطّلين: الأدمن يشوف إن الميزة جاية، ومايضغطش زر هيطلعله
-           "القناة مش جاهزة" بعد ما يحفظ الحملة. #}
-        <option value="push" {% if channel == 'push' %}selected{% endif %}>Push (إشعارات)</option>
-        <option value="whatsapp" disabled>WhatsApp — قريباً</option>
-        <option value="both" disabled>Push + WhatsApp — قريباً</option>
-      </select>
-    </label>
-    <div></div>
+<div class="panel mt-4">
+  <div class="panel-head">
+    <h2 class="panel-title">جرب اختيار تاني</h2>
+  </div>
+  <div class="panel-body">
+    <form method="post" action="/admin/marketing/preview" class="cols cols-2">
+      {{ csrf_field(request) }}
+      <div>
+        <label class="label" for="audience-type">نوع الجمهور</label>
+        <select name="audience_type" id="audience-type" class="select">
+          <option value="all" {% if audience_type == 'all' %}selected{% endif %}>كل العملاء</option>
+          <option value="segment" {% if audience_type == 'segment' %}selected{% endif %}>شريحة محددة</option>
+          <option value="imported" {% if audience_type == 'imported' %}selected{% endif %}>عملاء مستوردين</option>
+        </select>
+      </div>
+      <div id="segment-field">
+        <label class="label" for="segment-key">الشريحة</label>
+        <select id="segment-key" name="segment_key" class="select">
+          {% for seg in segments() %}
+          <option value="{{ seg.key }}" {% if segment_key == seg.key %}selected{% endif %}>{{ seg.label }} — {{ seg.description }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="label" for="preview-channel">القناة</label>
+        <select id="preview-channel" name="channel" class="select">
+          <option value="push" {% if channel == 'push' %}selected{% endif %}>إشعارات المتصفح</option>
+          <option value="whatsapp" {% if channel == 'whatsapp' %}selected{% endif %}>واتساب</option>
+          <option value="both" {% if channel == 'both' %}selected{% endif %}>القناتين</option>
+        </select>
+      </div>
+      <div></div>
 
-    {# العتبات دي بتتخزّن مع الحملة (`audience_params`) عشان الإرسال
-       يطابق المعاينة بالظبط. #}
-    <label class="block">
-      <span class="text-xs font-bold text-slate-600">نشط لو طلب في آخر (يوم)</span>
-      <input type="number" name="recently_active_days" min="1" max="365"
-             value="{{ params.recently_active_days }}"
-             class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-    </label>
-    <label class="block">
-      <span class="text-xs font-bold text-slate-600">خامل لو من غير طلب (يوم)</span>
-      <input type="number" name="inactive_days" min="1" max="365"
-             value="{{ params.inactive_days }}"
-             class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-    </label>
-    <label class="block">
-      <span class="text-xs font-bold text-slate-600">حد الإنفاق العالي (جنيه)</span>
-      <input type="number" name="high_spending_minimum" min="0" step="0.01"
-             value="{{ params.high_spending_minimum }}"
-             class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-    </label>
-    <div class="flex items-end">
-      <button type="submit"
-              class="w-full rounded-full bg-slate-900 px-4 py-2 text-sm font-bold text-white transition hover:bg-slate-800">
-        اعرض
-      </button>
-    </div>
-  </form>
-  <p class="mt-2 text-xs text-slate-500">
-    العتبات دي بتتحقق: لازم "نشط" أقل من "خامل"، وإلا الشريحتين بقوا بعض.
-  </p>
+      {# العتبات دي بتتخزّن مع الحملة (`audience_params`) عشان الإرسال
+         يطابق المعاينة بالظبط. #}
+      <div>
+        <label class="label" for="ra-days">نشط: طلب في آخر</label>
+        <div class="flex items-center gap-2">
+          <input id="ra-days" type="number" name="recently_active_days" min="1" max="365"
+                 value="{{ params.recently_active_days }}" class="input">
+          <span class="text-sm font-bold text-slate-600">يوم</span>
+        </div>
+      </div>
+      <div>
+        <label class="label" for="in-days">خامل: من غير طلب منذ</label>
+        <div class="flex items-center gap-2">
+          <input id="in-days" type="number" name="inactive_days" min="1" max="365"
+                 value="{{ params.inactive_days }}" class="input">
+          <span class="text-sm font-bold text-slate-600">يوم</span>
+        </div>
+      </div>
+      <div>
+        <label class="label" for="min-spend">حد الإنفاق العالي</label>
+        <div class="flex items-center gap-2">
+          <input id="min-spend" type="number" name="high_spending_minimum" min="0" step="0.01"
+                 value="{{ params.high_spending_minimum }}" class="input">
+          <span class="text-sm font-bold text-slate-600">جنيه</span>
+        </div>
+      </div>
+      <div class="flex items-end">
+        <button type="submit" class="btn btn-dark btn-block">اعرض</button>
+      </div>
+    </form>
+    <p class="field-hint mt-3">
+      العتبات دي بتتحقق: لازم "نشط" أقل من "خامل"، وإلا الشريحتين بقوا بعض.
+    </p>
+  </div>
 </div>
 
 <script>

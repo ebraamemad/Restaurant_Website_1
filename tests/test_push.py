@@ -359,7 +359,12 @@ class TestVapidConfig:
         )
 
     def test_env_format_key_is_64_bytes_without_prefix(self, vapid_on, vapid_keys):
-        """`public_key_env_format()` (للعرض الإداري) يفضل 64 بايت."""
+        """`public_key_env_format()` (للعرض الإداري) يفضل 64 بايت.
+
+        **مفيش تأكيد إن أول بايت != 0x04:** ده مش مضمون — أول بايت من X
+        ممكن يكون `0x04` بالصدفة والمفتاح يفضل سليم. اللي مضمون إن الشكل
+        X‖Y (64 بايت) من غير prefix، وبنثبته بمقارنته بالقيمة الأصلية.
+        """
         import base64 as b64mod
 
         from app import push
@@ -367,7 +372,6 @@ class TestVapidConfig:
         env_value = push.public_key_env_format()
         raw = b64mod.urlsafe_b64decode(env_value + "=" * (-len(env_value) % 4))
         assert len(raw) == 64
-        assert raw[0] != 0x04
         assert env_value == vapid_keys["public_key"]
 
     def test_browser_key_derived_from_private_only(self, vapid_keys, settings_snapshot):
@@ -545,6 +549,113 @@ class TestVapidConfig:
         assert sub.failure_count == 0
         assert push.is_configured() is False
         config_module.get_vapid_private_pem.cache_clear()
+
+
+class TestVapidPublicKeyFormats:
+    """`normalize_vapid_public_key` — الصيغ المقبولة للمفتاح العام.
+
+    **ثابتة بالكامل** (مفيش توليد مفاتيح عشوائي) عشان تغطي الحالة اللي
+    كانت بتفشل بشكل متقطع: مفتاح X‖Y بحجم 64 بايت أول بايت فيه `0x04`.
+    """
+
+    @staticmethod
+    def _b64(raw: bytes) -> str:
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+    @staticmethod
+    def _unb64(value: str) -> bytes:
+        return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+    def test_64_byte_key_starting_with_04_is_preserved(self):
+        """مفتاح 64 بايت أول بايت فيه `0x04` لازم يفضل زي ما هو.
+
+        `0x04` في أول مفتاح 64 بايت قيمة بيانات عادية، مش prefix.
+        الكود القديم كان بيشيله → 63 بايت → يرفض المفتاح الصحيح.
+        """
+        from app.config import normalize_vapid_public_key
+
+        raw = b"\x04" + bytes(range(63))
+        out = self._unb64(normalize_vapid_public_key(self._b64(raw)))
+        assert len(out) == 64
+        assert out == raw
+
+    def test_64_byte_key_without_prefix_is_preserved(self):
+        raw = b"\x07" + bytes(range(63))
+        from app.config import normalize_vapid_public_key
+
+        assert self._unb64(normalize_vapid_public_key(self._b64(raw))) == raw
+
+    def test_65_byte_uncompressed_strips_prefix(self):
+        """النقطة غير المضغوطة الحقيقية (65 بايت) لازم تفقد الـ`0x04`."""
+        xy = b"\x11" + bytes(range(63))
+        uncompressed = b"\x04" + xy
+
+        from app.config import normalize_vapid_public_key
+
+        out = self._unb64(normalize_vapid_public_key(self._b64(uncompressed)))
+        assert len(out) == 64
+        assert out == xy
+
+    def test_65_byte_without_prefix_is_rejected(self):
+        """65 بايت من غير `0x04` = صيغة تالفة، تترفض مش تتقصّ."""
+        raw = b"\x07" + bytes(range(64))
+
+        from app.config import normalize_vapid_public_key
+
+        with pytest.raises(ValueError):
+            normalize_vapid_public_key(self._b64(raw))
+
+    @pytest.mark.parametrize("size", [0, 1, 32, 63, 66, 80])
+    def test_wrong_lengths_are_rejected(self, size):
+        raw = b"\x04" + bytes(max(0, size - 1))
+
+        from app.config import normalize_vapid_public_key
+
+        with pytest.raises(ValueError):
+            normalize_vapid_public_key(self._b64(raw))
+
+    def test_pem_public_key_normalizes_to_64_bytes(self):
+        """PEM (شكل آخر مدعوم) بيتحوّل لـ64 بايت من غير prefix.
+
+        برضه ثابت: بنشتق النقطة من عدد خاص ثابت (1) بدل توليد عشوائي.
+        """
+        key = ec.derive_private_key(1, ec.SECP256R1())
+        pem = key.public_key().public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("ascii")
+        full = key.public_key().public_bytes(
+            serialization.Encoding.X962,
+            serialization.PublicFormat.UncompressedPoint,
+        )
+
+        from app.config import normalize_vapid_public_key
+
+        out = self._unb64(normalize_vapid_public_key(pem))
+        assert len(out) == 64
+        assert out == full[1:]
+
+    def test_config_accepts_64_byte_key_starting_with_04(self, settings_snapshot):
+        """نفس السيناريو المبلَّغ عنه من خلال `get_vapid_public_key`."""
+        import app.config as config_module
+
+        raw = b"\x04" + bytes(range(63))
+        encoded = self._b64(raw)
+        original = settings_snapshot.vapid_public_key
+        config_module.get_vapid_public_key.cache_clear()
+        config_module.get_vapid_public_key_browser.cache_clear()
+        try:
+            settings_snapshot.vapid_public_key = encoded
+            assert config_module.get_vapid_public_key() == encoded
+            # ولما نسلّمه للمتصفح: 65 بايت مع الـprefix واحدة بس
+            browser = self._unb64(config_module.get_vapid_public_key_browser())
+            assert len(browser) == 65
+            assert browser[0] == 0x04
+            assert browser[1:] == raw
+        finally:
+            settings_snapshot.vapid_public_key = original
+            config_module.get_vapid_public_key.cache_clear()
+            config_module.get_vapid_public_key_browser.cache_clear()
 
 
 # ============================================================

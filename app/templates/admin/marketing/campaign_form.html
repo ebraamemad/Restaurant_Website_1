@@ -1,171 +1,345 @@
 {% extends "admin/base.html" %}
 {% block content %}
 
-{# ===== إنشاء حملة ===== #}
-{# الصفحة دي **مش بتبعت**. بتكتب وتحفظ كـ`draft`، والإرسال خطوة
-   تانية مقصودة. الفصل ده بيدّي الأدمن فرصة تقرأ الرسالة تاني. #}
-<div class="flex flex-wrap items-center justify-between gap-3">
-  <h1 class="text-xl font-extrabold sm:text-2xl">حملة جديدة</h1>
-  <a href="/admin/marketing/campaigns" class="text-sm font-bold text-emerald-700 hover:underline">رجوع للحملات</a>
+{# ===== إنشاء حملة — معالج خطوات: مين → إيه → إزاي → إمتى → مراجعة =====
+   الصفحة **مش بتتبعت** — بتكتب وتحفظ كـ`draft`، والإرسال خطوة
+   تانية مقصودة من صفحة الحملة. كل أسماء الحقول والـendpoint مطابقة
+   للقديم: `/admin/marketing/campaigns` (POST). #}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">حملة جديدة</h1>
+    <p class="page-sub">خمس خطوات: مين هيوصله العرض، إيه اللي هيتقال، إزاي هيتبعت، وإمتى.</p>
+  </div>
+  <a href="/admin/marketing/campaigns" class="btn btn-outline btn-sm">رجوع للحملات</a>
 </div>
 
 {% if error %}
-<div class="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-800">
-  {{ error_messages.get(error, 'حصلت مشكلة. جرّب تاني.') }}
-</div>
+<div class="alert alert-danger mb-4">{{ error_messages.get(error, 'حصلت مشكلة. جرّب تاني.') }}</div>
 {% endif %}
 
-<form method="post" action="/admin/marketing/campaigns" class="mt-4 grid gap-4 sm:grid-cols-2">
+{# قيم جاهزة (لو جينا من "اكتب الحملة على N عميل" في المعاينة) #}
+{% set _init = {
+  'audienceType': request.query_params.get('audience_type', 'all'),
+  'segmentKey': request.query_params.get('segment_key', ''),
+  'channel': request.query_params.get('channel', 'push'),
+  'recentlyActiveDays': (request.query_params.get('recently_active_days', '30') | int),
+  'inactiveDays': (request.query_params.get('inactive_days', '90') | int),
+  'highSpendingMinimum': (request.query_params.get('high_spending_minimum', '200') | int),
+} %}
+<form method="post" action="/admin/marketing/campaigns" x-data='campaignWizard({{ _init | tojson }})' x-cloak>
   {{ csrf_field(request) }}
 
-  <div class="sm:col-span-2 rounded-2xl border border-slate-200 bg-white p-4">
-    <h2 class="font-extrabold">الجمهور</h2>
-    <div class="mt-3 grid gap-3 sm:grid-cols-2">
-      <label class="block">
-        <span class="text-xs font-bold text-slate-600">نوع الجمهور</span>
-        <select name="audience_type" id="audience-type" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-          <option value="all">كل العملاء</option>
-          <option value="segment">شريحة</option>
-          <option value="imported">عملاء مستوردين</option>
-        </select>
-      </label>
-      <label class="block" id="segment-field" style="display:none">
-        <span class="text-xs font-bold text-slate-600">الشريحة</span>
-        <select name="segment_key" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" disabled>
+  {# ===== شريط الخطوات ===== #}
+  <div class="wizard-nav" role="tablist" aria-label="خطوات إنشاء الحملة">
+    <template x-for="(label, i) in steps" :key="i">
+      <button type="button" class="wizard-step"
+              :class="{ 'current': step === i + 1, 'done': step > i + 1 }"
+              x-text="label" @click="go(i + 1)"></button>
+    </template>
+  </div>
+
+  {# تنبيه التحقق: من غير `wizard-panel` عشان مايتخفاش — الكلاس ده `display:none`
+     بدون `.active`، وكان بيخلي رسالة الخطأ غير مرئية والأزرار تبان "مش شغالة". #}
+  <p x-show="errorMessage" x-text="errorMessage" style="color:rgb(220 38 38);font-weight:800;font-size:.85rem;margin-bottom:.75rem;"></p>
+
+  <div class="panel p-4 sm:p-6">
+
+    {# ===== الخطوة 1: مين؟ ===== #}
+    <div class="wizard-panel" :class="{ active: step === 1 }">
+      <h2 class="text-lg font-extrabold">مين هيوصله العرض؟</h2>
+      <p class="mt-1 text-sm text-slate-500">اختار مجموعة العملاء اللي عايز توصلها.</p>
+
+      <div class="cols cols-2 mt-4">
+        <label class="wizard-option" :class="{ selected: audienceType === 'all' }">
+          <input type="radio" name="audience_type" value="all" x-model="audienceType">
+          <span class="wo-check" aria-hidden="true">✓</span>
+          <span class="wo-title">كل العملاء</span>
+          <span class="wo-desc">كل عميل مسموح له استقبال العروض — بمن فيهم اللي لسه ما طلبوش حاجة.</span>
+        </label>
+        <label class="wizard-option" :class="{ selected: audienceType === 'segment' }">
+          <input type="radio" name="audience_type" value="segment" x-model="audienceType">
+          <span class="wo-check" aria-hidden="true">✓</span>
+          <span class="wo-title">شريحة محددة</span>
+          <span class="wo-desc">مجموعة بمعايير معينة: نشطين حديثاً، خاملين، إنفاق عالي، طلب واحد... إلخ.</span>
+        </label>
+        <label class="wizard-option" :class="{ selected: audienceType === 'imported' }">
+          <input type="radio" name="audience_type" value="imported" x-model="audienceType">
+          <span class="wo-check" aria-hidden="true">✓</span>
+          <span class="wo-title">العملاء المستوردون</span>
+          <span class="wo-desc">جهات الاتصال اللي جبتها بملف CSV — مفيدة لو لسه بتبني قاعدة العملاء.</span>
+        </label>
+      </div>
+
+      <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4" x-show="audienceType === 'segment'">
+        <label class="label" for="segment-key">أي مجموعة بالظبط؟</label>
+        <select id="segment-key" name="segment_key" class="select" x-model="segmentKey" :disabled="audienceType !== 'segment'">
+          <option value="">اختار الشريحة...</option>
           {% for seg in segments() %}
-          <option value="{{ seg.key }}">{{ seg.label }}</option>
+          <option value="{{ seg.key }}">{{ seg.label }} — {{ seg.description }}</option>
           {% endfor %}
         </select>
-      </label>
-      <label class="block">
-        <span class="text-xs font-bold text-slate-600">القناة</span>
-        <select name="channel" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-          <option value="push">Push (إشعارات)</option>
-          {# واتساب منفّذة من Phase 5. الاختيار بيحفظ الحملة بس؛
-             لو الإعدادات ناقصة، `send_campaign` بيرفض بـ`ChannelNotReady`
-             **قبل** ما الحالة تتحوّل لـ`sending`، فالحملة بتفضل
-             قابلة للتعديل. #}
-          <option value="whatsapp">WhatsApp</option>
-          <option value="both">Push + WhatsApp</option>
-        </select>
-      </label>
+        <p class="field-hint">الشريحة اللي حددتها هنا هي اللي هتتخزن مع الحملة وتتستخدم وقت الإرسال.</p>
+
+        <div class="cols cols-3 mt-4">
+          <div class="field-group mb-0">
+            <label class="label" for="recently-active-days">نشط: طلب في آخر</label>
+            <div class="flex items-center gap-2">
+              <input id="recently-active-days" type="number" name="recently_active_days" min="1" max="365" class="input" x-model.number="recentlyActiveDays">
+              <span class="text-sm font-bold text-slate-600">يوم</span>
+            </div>
+          </div>
+          <div class="field-group mb-0">
+            <label class="label" for="inactive-days">خامل: من غير طلب منذ</label>
+            <div class="flex items-center gap-2">
+              <input id="inactive-days" type="number" name="inactive_days" min="1" max="365" class="input" x-model.number="inactiveDays">
+              <span class="text-sm font-bold text-slate-600">يوم</span>
+            </div>
+          </div>
+          <div class="field-group mb-0">
+            <label class="label" for="high-spending-minimum">حد الإنفاق العالي</label>
+            <div class="flex items-center gap-2">
+              <input id="high-spending-minimum" type="number" name="high_spending_minimum" min="0" step="0.01" class="input" x-model.number="highSpendingMinimum">
+              <span class="text-sm font-bold text-slate-600">جنيه</span>
+            </div>
+          </div>
+        </div>
+        <p class="field-hint mt-3">
+          الأرقام دي عادية بشكل افتراضي لمعظم المطاعم. ممكن تعدّلها حسب نشاطك.
+        </p>
+      </div>
     </div>
 
-    {# العتبات بتتخزّن مع الحملة في `audience_params`، فالإرسال
-       بيبقى على نفس الجمهور اللي شافته في المعاينة. #}
-    <div class="mt-3 grid gap-3 sm:grid-cols-2">
-      <label class="block">
-        <span class="text-xs font-bold text-slate-600">نشط لو طلب في آخر (يوم)</span>
-        <input type="number" name="recently_active_days" min="1" max="365" value="30"
-               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-      </label>
-      <label class="block">
-        <span class="text-xs font-bold text-slate-600">خامل لو من غير طلب (يوم)</span>
-        <input type="number" name="inactive_days" min="1" max="365" value="90"
-               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-      </label>
-      <label class="block">
-        <span class="text-xs font-bold text-slate-600">حد الإنفاق العالي (جنيه)</span>
-        <input type="number" name="high_spending_minimum" min="0" step="0.01" value="200"
-               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-      </label>
+    {# ===== الخطوة 2: إيه الرسالة؟ ===== #}
+    <div class="wizard-panel" :class="{ active: step === 2 }">
+      <h2 class="text-lg font-extrabold">إيه اللي هيتقال؟</h2>
+      <p class="mt-1 text-sm text-slate-500">اكتب الرسالة اللي هيشوفها العميل — مع معاينة حيّة جنبك.</p>
+
+      <div class="cols mt-4" :class="messageStepHasPreview ? 'cols-2 items-start' : ''">
+        <div>
+          <div class="field-group">
+            <label class="label" for="campaign-name">اسم الحملة (لتنظيمك أنت)</label>
+            <input id="campaign-name" type="text" name="name" required maxlength="120" placeholder="عرض الجمعة" class="input" x-model="name">
+          </div>
+          <div class="field-group">
+            <label class="label" for="campaign-title">العنوان (اللي العميل يشوفه)</label>
+            <input id="campaign-title" type="text" name="title" required maxlength="160" placeholder="خصم 20% على الكل" class="input" x-model="title">
+          </div>
+          <div class="field-group">
+            <label class="label" for="campaign-message">نص الرسالة</label>
+            <textarea id="campaign-message" name="message" required maxlength="1000" rows="4" class="textarea"
+                      placeholder="عرض الجمعة انتهى — خصم 20% على كل الأصناف لحد المغرب." x-model="message"></textarea>
+          </div>
+          <div class="cols cols-2">
+            <div class="field-group mb-0">
+              <label class="label" for="campaign-link">رابط عند الدوس (اختياري)</label>
+              <input id="campaign-link" type="text" name="link_url" maxlength="600" placeholder="/menu" dir="ltr" class="input" x-model="linkUrl">
+              <span class="field-hint">مسار داخلي أو رابط https كامل.</span>
+            </div>
+            <div class="field-group mb-0">
+              <label class="label" for="campaign-image">صورة الإشعار (اختياري)</label>
+              <input id="campaign-image" type="text" name="image_url" maxlength="600" placeholder="/static/promo.jpg" dir="ltr" class="input" x-model="imageUrl">
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <p class="label">معاينة الرسالة</p>
+          <div class="msg-preview">
+            <div class="msg-preview-head">
+              <span class="msg-preview-app" aria-hidden="true">🍽</span>
+              <span x-text="name || 'اسم الحملة'"></span>
+            </div>
+            <div class="msg-preview-body">
+              <div class="msg-preview-title" x-text="title || 'عنوان الرسالة'"></div>
+              <div class="msg-preview-text" x-text="message || 'نص الرسالة هيظهر هنا.'"></div>
+              <span class="msg-preview-link" x-show="linkUrl" x-text="'فتح العرض ←'"></span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
-    <p class="mt-2 text-xs text-slate-500">
-      <a href="/admin/marketing" class="font-bold text-emerald-700 hover:underline">عاين الجمهور الأول</a>
-      — أحسن من إنك تبعت بالرقم الخطأ.
-    </p>
-  </div>
 
-  <div class="sm:col-span-2 rounded-2xl border border-slate-200 bg-white p-4">
-    <h2 class="font-extrabold">الرسالة</h2>
-    <div class="mt-3 grid gap-3">
-      <label class="block">
-        <span class="text-xs font-bold text-slate-600">اسم الحملة (لكلّمتك أنت)</span>
-        <input type="text" name="name" required maxlength="120"
-               placeholder="عرض الجمعة"
-               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-      </label>
-      <label class="block">
-        <span class="text-xs font-bold text-slate-600">العنوان (اللي العميل يشوفه)</span>
-        <input type="text" name="title" required maxlength="160"
-               placeholder="خصم 20% على الكل"
-               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-      </label>
-      <label class="block">
-        <span class="text-xs font-bold text-slate-600">نص الرسالة</span>
-        <textarea name="message" required maxlength="1000" rows="3"
-                  placeholder="عرض الجمعة انتهى — خصم 20% على كل الأصناف لحد المغرب."
-                  class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></textarea>
-      </label>
+    {# ===== الخطوة 3: إزاي؟ ===== #}
+    <div class="wizard-panel" :class="{ active: step === 3 }">
+      <h2 class="text-lg font-extrabold">إزاي هتبعت الرسالة؟</h2>
+      <p class="mt-1 text-sm text-slate-500">القناة اللي هتوصل بيها الرسالة.</p>
+
+      <div class="cols cols-3 mt-4">
+        <label class="wizard-option" :class="{ selected: channel === 'push' }">
+          <input type="radio" name="channel" value="push" x-model="channel">
+          <span class="wo-check" aria-hidden="true">✓</span>
+          <span class="wo-title">🔔 إشعارات المتصفح</span>
+          <span class="wo-desc">رسالة بتوصل للموبايل أو الجهاز حتى وهو مقفول — للعملاء اللي فعّلوا الإشعارات.</span>
+        </label>
+        <label class="wizard-option" :class="{ selected: channel === 'whatsapp' }">
+          <input type="radio" name="channel" value="whatsapp" x-model="channel">
+          <span class="wo-check" aria-hidden="true">✓</span>
+          <span class="wo-title">💬 واتساب</span>
+          <span class="wo-desc">رسالة واتساب عبر المطعم — لازم واتساب يكون مربوط ومضبوط من «إعدادات واتساب» الأول.</span>
+        </label>
+        <label class="wizard-option" :class="{ selected: channel === 'both' }">
+          <input type="radio" name="channel" value="both" x-model="channel">
+          <span class="wo-check" aria-hidden="true">✓</span>
+          <span class="wo-title">📣 القناتين</span>
+          <span class="wo-desc">نفس الرسالة إشعار وواتساب مع بعض — أوسع وصول.</span>
+        </label>
+      </div>
+
+      <div class="alert alert-info mt-4" x-show="channel !== 'push'">
+        <span>💡 لو واتساب لسه ما اتربطش، هتلاقي تنبيه واضح وقت الإرسال، والحملة مش هتتبعت لحين الظبط من "إعدادات واتساب".</span>
+      </div>
     </div>
-  </div>
 
-  <div class="sm:col-span-2 rounded-2xl border border-slate-200 bg-white p-4">
-    <h2 class="font-extrabold">الوجهة</h2>
-    <div class="mt-3 grid gap-3 sm:grid-cols-2">
-      <label class="block">
-        <span class="text-xs font-bold text-slate-600">رابط لما يدوس (اختياري)</span>
-        <input type="text" name="link_url" maxlength="600" placeholder="/menu"
-               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" dir="ltr">
-        <span class="mt-1 block text-xs text-slate-500">
-          مسار داخلي زي <code dir="ltr">/menu</code> أو رابط <code dir="ltr">https</code>.
-        </span>
-      </label>
-      <label class="block">
-        <span class="text-xs font-bold text-slate-600">صورة الإشعار (اختياري)</span>
-        <input type="text" name="image_url" maxlength="600" placeholder="/static/promo.jpg"
-               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" dir="ltr">
-        <span class="mt-1 block text-xs text-slate-500">
-          نفس القواعد. المسارات اللي بتبقى `<code dir="ltr">javascript:</code>`
-          بتترفض قبل ما تتخزن.
-        </span>
-      </label>
+    {# ===== الخطوة 4: إمتى؟ ===== #}
+    <div class="wizard-panel" :class="{ active: step === 4 }">
+      <h2 class="text-lg font-extrabold">إمتى تتبعت الحملة؟</h2>
+      <p class="mt-1 text-sm text-slate-500">فوراً لما تعتمد، أو في وقت محدد.</p>
+
+      <div class="cols cols-2 mt-4">
+        <label class="wizard-option" :class="{ selected: scheduledMode === 'now' }">
+          <input type="radio" name="scheduledModeShown" value="now" x-model="scheduledMode">
+          <span class="wo-check" aria-hidden="true">✓</span>
+          <span class="wo-title">الآن</span>
+          <span class="wo-desc">الحملة هترجعلك تشوفها وتراجعها، ومن صفحتها تقدر تبدأ الإرسال فوراً.</span>
+        </label>
+        <label class="wizard-option" :class="{ selected: scheduledMode === 'scheduled' }">
+          <input type="radio" name="scheduledModeShown" value="scheduled" x-model="scheduledMode">
+          <span class="wo-check" aria-hidden="true">✓</span>
+          <span class="wo-title">جدولة لوقت محدد</span>
+          <span class="wo-desc">حدد التاريخ والوقت، والحملة هتتبعت تلقائياً أول ما الوقت يجي.</span>
+        </label>
+      </div>
+
+      <div class="mt-4" x-show="scheduledMode === 'scheduled'">
+        <label class="label" for="campaign-schedule">التاريخ والوقت</label>
+        <input id="campaign-schedule" type="datetime-local" name="scheduled_at" class="input sm:max-w-xs" dir="ltr" x-model="scheduledAt" :disabled="scheduledMode !== 'scheduled'">
+        <span class="field-hint">بتوقيت السيرفر. لو تركتها فاضية، الحملة هتتبعت فوراً عند التأكيد.</span>
+      </div>
     </div>
-  </div>
 
-  <div class="sm:col-span-2 rounded-2xl border border-slate-200 bg-white p-4">
-    <h2 class="font-extrabold">التوقيت</h2>
-    <label class="mt-3 block">
-      <span class="text-xs font-bold text-slate-600">جدولة (اختياري — سيبه فاضي للإرسال فوراً)</span>
-      <input type="datetime-local" name="scheduled_at"
-             class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" dir="ltr">
-      <span class="mt-1 block text-xs text-slate-500">
-        بتوقيت السيرفر. الحملة بتتبعت أول ما حد يفتح صفحة الحملات بعد الوقت ده.
-      </span>
-    </label>
-  </div>
+    {# ===== الخطوة 5: مراجعة ===== #}
+    <div class="wizard-panel" :class="{ active: step === 5 }">
+      <h2 class="text-lg font-extrabold">مراجعة أخيرة</h2>
+      <p class="mt-1 text-sm text-slate-500">الحملة هتتحفظ كمسودة — الإرسال خطوة تانية مقصودة من صفحة الحملة بعد ما تراجع الرسالة.</p>
 
-  <div class="sm:col-span-2 flex flex-wrap gap-2">
-    <button type="submit"
-            class="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800">
-      احفظ (مش هيتبعت لسه)
-    </button>
-    <a href="/admin/marketing/campaigns"
-       class="rounded-full border border-slate-300 px-5 py-2.5 text-sm font-bold transition hover:bg-slate-50">
-      إلغاء
-    </a>
+      <div class="cols cols-2 mt-4">
+        <div class="space-y-3">
+          <div class="rounded-xl border border-slate-200 p-4">
+            <p class="label mb-1">الجمهور</p>
+            <p class="font-extrabold text-slate-900" x-text="audienceSummary"></p>
+            <p class="text-xs text-slate-500 mt-0.5" x-show="audienceType === 'segment'" x-text="segmentDetail"></p>
+          </div>
+          <div class="rounded-xl border border-slate-200 p-4">
+            <p class="label mb-1">القناة</p>
+            <p class="font-extrabold text-slate-900" x-text="channelSummary"></p>
+          </div>
+          <div class="rounded-xl border border-slate-200 p-4">
+            <p class="label mb-1">الموعد</p>
+            <p class="font-extrabold text-slate-900" x-show="scheduledMode === 'now'">فوراً — بعد المراجعة من صفحة الحملة</p>
+            <p class="font-extrabold text-slate-900" x-show="scheduledMode === 'scheduled'">
+              <span x-text="scheduledAt || 'لم يحدد بعد'"></span>
+              <span class="block text-xs font-bold text-slate-500 mt-0.5">بتوقيت السيرفر</span>
+            </p>
+          </div>
+        </div>
+
+        <div>
+          <p class="label">الرسالة زي ما هتشوفها</p>
+          <div class="msg-preview">
+            <div class="msg-preview-head">
+              <span class="msg-preview-app" aria-hidden="true">🍽</span>
+              <span x-text="name || 'اسم الحملة'"></span>
+            </div>
+            <div class="msg-preview-body">
+              <div class="msg-preview-title" x-text="title || 'عنوان الرسالة'"></div>
+              <div class="msg-preview-text" x-text="message || 'نص الرسالة'"></div>
+              <span class="msg-preview-link" x-show="linkUrl" x-text="'فتح العرض ←'"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {# ===== أزرار التنقل ===== #}
+    <div class="wizard-footer">
+      <button type="button" class="btn btn-ghost" @click="prev()" x-show="step > 1">→ رجوع</button>
+      <span x-show="step === 1"></span>
+      <button type="button" class="btn btn-dark" @click="next()" x-show="step < 5">التالي ←</button>
+      <button type="submit" class="btn btn-lg btn-primary" x-show="step === 5">
+        احفظ الحملة كمسودة
+      </button>
+    </div>
   </div>
 </form>
 
 <script>
-(function () {
-  var typeField = document.getElementById('audience-type');
-  var segmentField = document.getElementById('segment-field');
-  if (!typeField || !segmentField) return;
+function campaignWizard(opts) {
+  opts = opts || {};
+  return {
+    step: 1,
+    steps: ['مين؟', 'إيه الرسالة؟', 'إزاي تتبعت؟', 'إمتى؟', 'مراجعة'],
+    errorMessage: '',
+    audienceType: opts.audienceType || 'all',
+    segmentKey: opts.segmentKey || '',
+    channel: opts.channel || 'push',
+    name: '',
+    title: '',
+    message: '',
+    linkUrl: '',
+    imageUrl: '',
+    scheduledMode: 'now',
+    scheduledAt: '',
+    recentlyActiveDays: typeof opts.recentlyActiveDays === 'number' ? opts.recentlyActiveDays : 30,
+    inactiveDays: typeof opts.inactiveDays === 'number' ? opts.inactiveDays : 90,
+    highSpendingMinimum: typeof opts.highSpendingMinimum === 'number' ? opts.highSpendingMinimum : 200,
 
-  function sync() {
-    var isSegment = typeField.value === 'segment';
-    segmentField.style.display = isSegment ? '' : 'none';
-    // `disabled` كمان مش بس مخفي: الحقل المعطّل مش بيتبعت مع
-    // الـform، فالـbackend بيفتكر إن `segment_key` فاضي وده الصح
-    // لما يكون الجمهور "الكل".
-    var select = segmentField.querySelector('select');
-    if (select) select.disabled = !isSegment;
-  }
+    get messageStepHasPreview() { return true; },
+    get segmentDetail() {
+      if (!this.segmentKey) return '';
+      const el = document.getElementById('segment-key');
+      if (el && el.selectedOptions && el.selectedOptions[0]) {
+        return el.selectedOptions[0].text.split(' — ')[0];
+      }
+      return this.segmentKey;
+    },
+    get audienceSummary() {
+      if (this.audienceType === 'segment') return 'شريحة: ' + (this.segmentDetail || 'لم تُختَر');
+      if (this.audienceType === 'imported') return 'العملاء المستوردون (CSV)';
+      return 'كل العملاء';
+    },
+    get channelSummary() {
+      if (this.channel === 'whatsapp') return 'واتساب';
+      if (this.channel === 'both') return 'إشعارات + واتساب';
+      return 'إشعارات المتصفح';
+    },
 
-  typeField.addEventListener('change', sync);
-  sync();
-})();
+    validateThrough(target) {
+      if (target >= 2 && this.audienceType === 'segment' && !this.segmentKey) {
+        this.errorMessage = 'اختار شريحة أولاً — أو غيّر "مين؟" لكل العملاء.';
+        return false;
+      }
+      if (target >= 3 && !(this.name.trim() && this.title.trim() && this.message.trim())) {
+        this.errorMessage = 'اكتب اسم الحملة والعنوان ونص الرسالة أولاً.';
+        return false;
+      }
+      if (target >= 5 && this.scheduledMode === 'scheduled' && !this.scheduledAt) {
+        this.errorMessage = 'حدد تاريخ ووقت الجدولة، أو اختار "الآن".';
+        return false;
+      }
+      this.errorMessage = '';
+      return true;
+    },
+    go(n) {
+      if (n < this.step) { this.step = n; this.errorMessage = ''; return; }
+      if (this.validateThrough(n)) {
+        this.step = n;
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    },
+    next() { this.go(this.step + 1); },
+    prev() { this.step = Math.max(1, this.step - 1); this.errorMessage = ''; }
+  };
+}
 </script>
 
 {% endblock %}

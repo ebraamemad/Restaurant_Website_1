@@ -88,10 +88,43 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2) الأصول الثابتة: cache-first. أسرع، وبتخدم من غير شبكة.
-  const isStaticAsset =
+  // 2) كود الواجهة (CSS/JS): network-first مع رجوع للـcache.
+  //
+  //    ده أهم واحد في الملف. لو رجعنا cache-first هنا، أي تعديل على
+  //    `app.css`/`tailwind.css` أو أي template هيفضل مخفي ورا الـcache
+  //    نقلبة (وحتى لو غيّرنا `CACHE_NAME`، الأصول بتتخزّن لوحدها بعد
+  //    الـprecache). النتيجة: لوحة شكلها باظ من غير أي خطأ في الكونسول.
+  //
+  //    network-first بيخلي آخر نسخة ديماً هي المعروضة، والـcache مجرد
+  //    fallback اوفلاين. الكود صغير، فالتأخير ضئيل.
+  const isCodeAsset =
     request.destination === 'style' ||
     request.destination === 'script' ||
+    url.pathname.startsWith('/static/css/') ||
+    url.pathname.startsWith('/static/js/');
+
+  if (isCodeAsset) {
+    event.respondWith(
+      fetch(request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.ok && networkResponse.type === 'basic') {
+            const copy = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          }
+          return networkResponse;
+        })
+        .catch(() =>
+          caches
+            .match(request, { ignoreSearch: true })
+            .then((cached) => cached || Response.error())
+        )
+    );
+    return;
+  }
+
+  // 3) باقي الأصول الثابتة (صور/خطوط/أيقونات): cache-first. ثابتة
+  //    فعلاً، فالأولوية للأداء وتوفير الشبكة.
+  const isStaticAsset =
     request.destination === 'image' ||
     request.destination === 'font' ||
     url.pathname.startsWith('/static/');

@@ -8,6 +8,35 @@
     x-cloak
     class="min-h-screen bg-transparent pb-24 sm:pb-8">
 
+    <!-- عارض علوي ثابت: اللوجو + زر السلة (الموبايل) -->
+    <a id="top"></a>
+    <header class="sticky top-0 z-40 border-b border-slate-200/70 bg-white/85 backdrop-blur">
+        <div class="mx-auto flex max-w-6xl items-center justify-between gap-3 px-3 py-2.5 sm:px-4">
+            <a href="#top" class="flex min-w-0 items-center gap-2.5" aria-label="العودة لأعلى الصفحة">
+                {% if settings.logo_url %}
+                <img src="{{ settings.logo_url }}" alt="" class="h-10 w-10 shrink-0 rounded-full border object-cover shadow-sm">
+                {% else %}
+                <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xl" style="background:var(--color-primary);color:#fff">🍽</span>
+                {% endif %}
+                <span class="truncate text-base font-extrabold text-slate-800">{{ settings.restaurant_name }}</span>
+            </a>
+            <button
+                type="button"
+                @click="cartOpen=true"
+                class="touch-target relative flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-bold transition active:scale-[0.98] lg:hidden"
+                style="background:var(--color-primary);color:#fff"
+                aria-label="فتح سلة الطلب">
+                <span aria-hidden="true">🛒</span>
+                <span>السلة</span>
+                <span
+                    x-show="items.length > 0"
+                    class="absolute -top-1.5 -right-1.5 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] font-extrabold shadow"
+                    style="background:#fff;color:var(--color-primary)"
+                    x-text="count()"></span>
+            </button>
+        </div>
+    </header>
+
     <!-- Hero -->
     {% include "public/components/hero.html" %}
 
@@ -17,7 +46,7 @@
         <div class="grid gap-4 lg:gap-6 lg:grid-cols-[1fr_340px]">
 
             <!-- المنتجات -->
-            <div class="space-y-4 sm:space-y-5 lg:space-y-6">
+            <div class="min-w-0 space-y-4 sm:space-y-5 lg:space-y-6">
 
                 <!-- الأقسام -->
                 {% include "public/components/categories.html" %}

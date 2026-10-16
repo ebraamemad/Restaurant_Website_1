@@ -1,63 +1,98 @@
 {% extends "admin/base.html" %}
 {% block content %}
-<h1 class="mb-5 text-2xl font-bold">الكوبونات</h1>
-<form method="post" class="mb-6 grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-2">
+<div class="page-header">
+  <div>
+    <h1 class="page-title">الكوبونات</h1>
+    <p class="page-sub">خصومات للعملاء — بنسبة أو بمبلغ ثابت.</p>
+  </div>
+</div>
+
+<form method="post" class="panel p-4 sm:p-6 mb-6 cols" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
   {{ csrf_field(request) }}
-  <input name="code" required class="rounded border px-3 py-2" placeholder="كود الكوبون (مثال: SAVE10)">
-  <select name="discount_type" required class="rounded border px-3 py-2">
-    <option value="percentage">نسبة مئوية %</option>
-    <option value="fixed">مبلغ ثابت</option>
-  </select>
-  <input name="discount_value" type="number" step="0.01" min="0.01" required class="rounded border px-3 py-2" placeholder="قيمة الخصم">
-  <input name="minimum_order" type="number" step="0.01" min="0" value="0" class="rounded border px-3 py-2" placeholder="الحد الأدنى للطلب">
-  <label class="text-sm text-slate-600">يبدأ من
-    <input name="start_date" type="datetime-local" required class="mt-1 w-full rounded border px-3 py-2">
-  </label>
-  <label class="text-sm text-slate-600">ينتهي في
-    <input name="end_date" type="datetime-local" required class="mt-1 w-full rounded border px-3 py-2">
-  </label>
-  <input name="usage_limit" type="number" min="1" class="rounded border px-3 py-2" placeholder="حد الاستخدامات (فاضي = غير محدود)">
-  <label class="flex items-center gap-2 text-sm text-slate-700"><input name="first_order_only" type="checkbox" value="true"> للطلب الأول فقط</label>
-  <label><input name="is_active" type="checkbox" value="true" checked> نشط</label>
-  <button class="rounded bg-slate-900 px-4 py-2 font-bold text-white md:col-span-2">إضافة كوبون</button>
+  <div class="field-group mb-0">
+    <label class="label" for="cp-code">كود الكوبون</label>
+    <input id="cp-code" name="code" required class="input font-mono" placeholder="مثال: SAVE10">
+  </div>
+  <div class="field-group mb-0">
+    <label class="label" for="cp-type">نوع الخصم</label>
+    <select id="cp-type" name="discount_type" required class="select">
+      <option value="percentage">نسبة مئوية %</option>
+      <option value="fixed">مبلغ ثابت</option>
+    </select>
+  </div>
+  <div class="field-group mb-0">
+    <label class="label" for="cp-value">قيمة الخصم</label>
+    <input id="cp-value" name="discount_value" type="number" step="0.01" min="0.01" required class="input" placeholder="قيمة الخصم">
+  </div>
+  <div class="field-group mb-0">
+    <label class="label" for="cp-min">الحد الأدنى للطلب</label>
+    <input id="cp-min" name="minimum_order" type="number" step="0.01" min="0" value="0" class="input" placeholder="الحد الأدنى للطلب">
+  </div>
+  <div class="field-group mb-0">
+    <label class="label" for="cp-start">يبدأ من</label>
+    <input id="cp-start" name="start_date" type="datetime-local" required class="input">
+  </div>
+  <div class="field-group mb-0">
+    <label class="label" for="cp-end">ينتهي في</label>
+    <input id="cp-end" name="end_date" type="datetime-local" required class="input">
+  </div>
+  <div class="field-group mb-0">
+    <label class="label" for="cp-limit">حد الاستخدامات</label>
+    <input id="cp-limit" name="usage_limit" type="number" min="1" class="input" placeholder="فاضي = غير محدود">
+  </div>
+  <div class="field-group mb-0 flex items-end gap-4 pb-1">
+    <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)"><input name="first_order_only" type="checkbox" value="true"> للطلب الأول فقط</label>
+    <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)"><input name="is_active" type="checkbox" value="true" checked> نشط</label>
+  </div>
+  <button class="btn btn-primary" style="grid-column:1/-1">إضافة كوبون</button>
 </form>
-<div class="grid gap-4 md:grid-cols-2">
+
+<div class="cols cols-2">
   {% for coupon in coupons %}
-    <form method="post" class="rounded bg-white p-4 shadow-sm">
+    <form method="post" class="panel p-4">
       {{ csrf_field(request) }}
       <input type="hidden" name="id" value="{{ coupon.id }}">
-      <div class="mb-2 flex items-center justify-between">
-        <span class="rounded bg-slate-100 px-2 py-1 text-xs font-bold">{{ status_of(coupon, now) }}</span>
+      <div class="mb-3 flex items-center justify-between gap-2">
+        <span class="badge badge-outline">{{ status_of(coupon, now) }}</span>
         <span class="text-xs text-slate-500">الاستخدام: {{ coupon.usage_count }}/{{ coupon.usage_limit or "∞" }}</span>
       </div>
-      <input name="code" value="{{ coupon.code }}" required class="mb-2 w-full rounded border px-3 py-2 font-mono" placeholder="الكود">
-      <select name="discount_type" class="mb-2 w-full rounded border px-3 py-2">
+      <label class="label" for="cp-code-{{ coupon.id }}">كود الكوبون</label>
+      <input id="cp-code-{{ coupon.id }}" name="code" value="{{ coupon.code }}" required class="input font-mono mb-3" placeholder="الكود">
+      <label class="label" for="cp-type-{{ coupon.id }}">نوع الخصم</label>
+      <select id="cp-type-{{ coupon.id }}" name="discount_type" class="select mb-3">
         <option value="percentage" {% if coupon.discount_type == "percentage" %}selected{% endif %}>نسبة مئوية %</option>
         <option value="fixed" {% if coupon.discount_type == "fixed" %}selected{% endif %}>مبلغ ثابت</option>
       </select>
-      <div class="mb-2 grid grid-cols-2 gap-2">
-        <label class="text-sm text-slate-600">قيمة الخصم
-          <input name="discount_value" type="number" step="0.01" min="0.01" value="{{ coupon.discount_value }}" required class="mt-1 w-full rounded border px-3 py-2">
-        </label>
-        <label class="text-sm text-slate-600">الحد الأدنى
-          <input name="minimum_order" type="number" step="0.01" min="0" value="{{ coupon.minimum_order }}" class="mt-1 w-full rounded border px-3 py-2">
-        </label>
+      <div class="cols cols-2 mb-3">
+        <div class="field-group mb-0">
+          <label class="label" for="cp-value-{{ coupon.id }}">قيمة الخصم</label>
+          <input id="cp-value-{{ coupon.id }}" name="discount_value" type="number" step="0.01" min="0.01" value="{{ coupon.discount_value }}" required class="input">
+        </div>
+        <div class="field-group mb-0">
+          <label class="label" for="cp-min-{{ coupon.id }}">الحد الأدنى</label>
+          <input id="cp-min-{{ coupon.id }}" name="minimum_order" type="number" step="0.01" min="0" value="{{ coupon.minimum_order }}" class="input">
+        </div>
       </div>
-      <div class="mb-2 grid grid-cols-2 gap-2">
-        <label class="text-sm text-slate-600">يبدأ من
-          <input name="start_date" type="datetime-local" value="{{ coupon.start_date.strftime('%Y-%m-%dT%H:%M') }}" required class="mt-1 w-full rounded border px-3 py-2">
-        </label>
-        <label class="text-sm text-slate-600">ينتهي في
-          <input name="end_date" type="datetime-local" value="{{ coupon.end_date.strftime('%Y-%m-%dT%H:%M') }}" required class="mt-1 w-full rounded border px-3 py-2">
-        </label>
+      <div class="cols cols-2 mb-3">
+        <div class="field-group mb-0">
+          <label class="label" for="cp-start-{{ coupon.id }}">يبدأ من</label>
+          <input id="cp-start-{{ coupon.id }}" name="start_date" type="datetime-local" value="{{ coupon.start_date.strftime('%Y-%m-%dT%H:%M') }}" required class="input">
+        </div>
+        <div class="field-group mb-0">
+          <label class="label" for="cp-end-{{ coupon.id }}">ينتهي في</label>
+          <input id="cp-end-{{ coupon.id }}" name="end_date" type="datetime-local" value="{{ coupon.end_date.strftime('%Y-%m-%dT%H:%M') }}" required class="input">
+        </div>
       </div>
-      <label class="mb-2 block text-sm text-slate-600">حد الاستخدامات
-        <input name="usage_limit" type="number" min="1" value="{{ coupon.usage_limit or '' }}" class="mt-1 w-full rounded border px-3 py-2" placeholder="فاضي = غير محدود">
-      </label>
-      <label class="mb-3 block"><input name="first_order_only" type="checkbox" value="true" {% if coupon.first_order_only %}checked{% endif %}> للطلب الأول فقط</label>
-      <label class="mb-3 block"><input name="is_active" type="checkbox" value="true" {% if coupon.is_active %}checked{% endif %}> نشط</label>
-      <button class="rounded bg-emerald-700 px-4 py-2 text-white">حفظ</button>
-      <button form="delete-coupon-{{ coupon.id }}" class="rounded bg-red-600 px-4 py-2 text-white">حذف</button>
+      <label class="label" for="cp-limit-{{ coupon.id }}">حد الاستخدامات</label>
+      <input id="cp-limit-{{ coupon.id }}" name="usage_limit" type="number" min="1" value="{{ coupon.usage_limit or '' }}" class="input mb-3" placeholder="فاضي = غير محدود">
+      <div class="mb-3 flex gap-4">
+        <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)"><input name="first_order_only" type="checkbox" value="true" {% if coupon.first_order_only %}checked{% endif %}> للطلب الأول فقط</label>
+        <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)"><input name="is_active" type="checkbox" value="true" {% if coupon.is_active %}checked{% endif %}> نشط</label>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button class="btn btn-primary btn-sm">حفظ</button>
+        <button form="delete-coupon-{{ coupon.id }}" class="btn btn-danger btn-sm">حذف</button>
+      </div>
     </form>
     <form id="delete-coupon-{{ coupon.id }}" method="post" action="/admin/coupons/{{ coupon.id }}/delete">{{ csrf_field(request) }}</form>
   {% endfor %}

@@ -1,82 +1,144 @@
 {% extends "admin/base.html" %}
 {% block content %}
-<h1 class="mb-2 text-2xl font-bold">خيارات "{{ product.name }}"</h1>
-<p class="mb-5 text-sm text-slate-500">
-  كل مجموعة خيارات مثال: "الحجم" (صغير/وسط/كبير). تقدر تحدد هل المجموعة إجبارية، وهل العميل يختار أكتر من خيار، والحد الأدنى/الأقصى للاختيارات.
-</p>
+<div class="page-header">
+  <div>
+    <h1 class="page-title">خيارات "{{ product.name }}"</h1>
+    <p class="page-sub">
+      كل مجموعة خيارات مثال: "الحجم" (صغير/وسط/كبير). تقدر تحدد هل المجموعة إجبارية،
+      وهل العميل يختار أكتر من خيار، والحد الأدنى/الأقصى للاختيارات.
+    </p>
+  </div>
+  <a href="/admin/products" class="btn btn-outline btn-sm">← العودة للمنتجات</a>
+</div>
 
-<form method="post" action="/admin/products/{{ product.id }}/options/groups" class="mb-6 grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-4">
-  {{ csrf_field(request) }}
-  <input name="name" required class="rounded border px-3 py-2" placeholder="اسم المجموعة (مثال: الحجم)">
-  <input name="min_selections" type="number" min="0" value="0" class="rounded border px-3 py-2" placeholder="حد أدنى للاختيارات">
-  <input name="max_selections" type="number" min="1" class="rounded border px-3 py-2" placeholder="حد أقصى (فاضي = بلا حد)">
-  <input name="sort_order" type="number" value="0" class="rounded border px-3 py-2" placeholder="الترتيب">
-  <label class="flex items-center gap-2"><input name="is_required" type="checkbox" value="true"> مجموعة إجبارية</label>
-  <label class="flex items-center gap-2"><input name="allow_multiple" type="checkbox" value="true"> اختيار أكثر من خيار</label>
-  <label class="flex items-center gap-2"><input name="is_available" type="checkbox" value="true" checked> متاحة</label>
-  <button class="rounded bg-slate-900 px-4 py-2 font-bold text-white md:col-span-4">إضافة مجموعة خيارات</button>
-</form>
+<div class="panel p-4 sm:p-6 mb-6">
+  <h2 class="panel-title mb-3">مجموعة خيارات جديدة</h2>
+  <form method="post" action="/admin/products/{{ product.id }}/options/groups" class="cols" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+    {{ csrf_field(request) }}
+    <div class="field-group mb-0">
+      <label class="label" for="og-name">اسم المجموعة</label>
+      <input id="og-name" name="name" required class="input" placeholder="مثال: الحجم">
+    </div>
+    <div class="field-group mb-0">
+      <label class="label" for="og-min">حد أدنى للاختيارات</label>
+      <input id="og-min" name="min_selections" type="number" min="0" value="0" class="input" placeholder="0">
+    </div>
+    <div class="field-group mb-0">
+      <label class="label" for="og-max">حد أقصى (فاضي = بلا حد)</label>
+      <input id="og-max" name="max_selections" type="number" min="1" class="input" placeholder="حد أقصى">
+    </div>
+    <div class="field-group mb-0">
+      <label class="label" for="og-sort">الترتيب</label>
+      <input id="og-sort" name="sort_order" type="number" value="0" class="input" placeholder="الترتيب">
+    </div>
+    <div class="field-group mb-0 flex flex-wrap items-end gap-4 pb-1">
+      <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)"><input name="is_required" type="checkbox" value="true"> إجبارية</label>
+      <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)"><input name="allow_multiple" type="checkbox" value="true"> اختيار أكثر من خيار</label>
+      <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)"><input name="is_available" type="checkbox" value="true" checked> متاحة</label>
+    </div>
+    <button class="btn btn-primary" style="grid-column:1/-1">إضافة مجموعة خيارات</button>
+  </form>
+</div>
 
 <div class="space-y-6">
   {% for group in groups %}
-    <div class="rounded bg-white p-4 shadow-sm">
-      <form method="post" action="/admin/products/{{ product.id }}/options/groups" class="grid gap-3 md:grid-cols-4">
+    <div class="panel p-4 sm:p-6">
+      <form method="post" action="/admin/products/{{ product.id }}/options/groups" class="cols" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
         {{ csrf_field(request) }}
         <input type="hidden" name="id" value="{{ group.id }}">
-        <input name="name" value="{{ group.name }}" required class="rounded border px-3 py-2" placeholder="اسم المجموعة">
-        <input name="min_selections" type="number" min="0" value="{{ group.min_selections }}" class="rounded border px-3 py-2" placeholder="حد أدنى">
-        <input name="max_selections" type="number" min="1" value="{{ group.max_selections if group.max_selections is not none else '' }}" class="rounded border px-3 py-2" placeholder="حد أقصى (فاضي = بلا حد)">
-        <input name="sort_order" type="number" value="{{ group.sort_order }}" class="rounded border px-3 py-2" placeholder="الترتيب">
-        <label class="flex items-center gap-2"><input name="is_required" type="checkbox" value="true" {% if group.is_required %}checked{% endif %}> مجموعة إجبارية</label>
-        <label class="flex items-center gap-2"><input name="allow_multiple" type="checkbox" value="true" {% if group.allow_multiple %}checked{% endif %}> اختيار أكثر من خيار</label>
-        <label class="flex items-center gap-2"><input name="is_available" type="checkbox" value="true" {% if group.is_available %}checked{% endif %}> متاحة</label>
-        <div class="flex gap-2">
-          <button class="rounded bg-emerald-700 px-4 py-2 text-white">حفظ المجموعة</button>
-          <button form="delete-group-{{ group.id }}" class="rounded bg-red-600 px-4 py-2 text-white">حذف المجموعة</button>
+        <div class="field-group mb-0">
+          <label class="label" for="og-name-{{ group.id }}">اسم المجموعة</label>
+          <input id="og-name-{{ group.id }}" name="name" value="{{ group.name }}" required class="input" placeholder="اسم المجموعة">
+        </div>
+        <div class="field-group mb-0">
+          <label class="label" for="og-min-{{ group.id }}">حد أدنى</label>
+          <input id="og-min-{{ group.id }}" name="min_selections" type="number" min="0" value="{{ group.min_selections }}" class="input" placeholder="حد أدنى">
+        </div>
+        <div class="field-group mb-0">
+          <label class="label" for="og-max-{{ group.id }}">حد أقصى</label>
+          <input id="og-max-{{ group.id }}" name="max_selections" type="number" min="1" value="{{ group.max_selections if group.max_selections is not none else '' }}" class="input" placeholder="حد أقصى">
+        </div>
+        <div class="field-group mb-0">
+          <label class="label" for="og-sort-{{ group.id }}">الترتيب</label>
+          <input id="og-sort-{{ group.id }}" name="sort_order" type="number" value="{{ group.sort_order }}" class="input" placeholder="الترتيب">
+        </div>
+        <div class="field-group mb-0 flex flex-wrap items-end gap-3 pb-1">
+          <label class="flex items-center gap-2 text-xs font-bold" style="color:var(--color-ink)"><input name="is_required" type="checkbox" value="true" {% if group.is_required %}checked{% endif %}> إجبارية</label>
+          <label class="flex items-center gap-2 text-xs font-bold" style="color:var(--color-ink)"><input name="allow_multiple" type="checkbox" value="true" {% if group.allow_multiple %}checked{% endif %}> متعدد</label>
+          <label class="flex items-center gap-2 text-xs font-bold" style="color:var(--color-ink)"><input name="is_available" type="checkbox" value="true" {% if group.is_available %}checked{% endif %}> متاحة</label>
+        </div>
+        <div class="flex flex-wrap gap-2" style="grid-column:1/-1">
+          <button class="btn btn-primary btn-sm">حفظ المجموعة</button>
+          <button form="delete-group-{{ group.id }}" class="btn btn-danger btn-sm">حذف المجموعة</button>
         </div>
       </form>
-      <form id="delete-group-{{ group.id }}" method="post" action="/admin/products/{{ product.id }}/options/groups/{{ group.id }}/delete">{{ csrf_field(request) }}</form>
+      <form id="delete-group-{{ group.id }}" method="post" action="/admin/products/{{ product.id }}/options/groups/{{ group.id }}/delete" class="hidden">{{ csrf_field(request) }}</form>
 
       <!-- خيارات المجموعة -->
-      <div class="mt-4 border-t pt-3">
-        <form method="post" action="/admin/products/{{ product.id }}/options" class="grid gap-3 md:grid-cols-5">
+      <div class="mt-4 border-t border-slate-200 pt-4">
+        <h3 class="mb-3 text-sm font-extrabold" style="color:var(--color-ink)">الخيارات</h3>
+        <form method="post" action="/admin/products/{{ product.id }}/options" class="cols mb-4" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
           {{ csrf_field(request) }}
           <input type="hidden" name="group_id" value="{{ group.id }}">
-          <input name="name" required class="rounded border px-3 py-2 md:col-span-2" placeholder="اسم الخيار (مثال: كبير)">
-          <input name="price_adjustment" type="number" step="0.01" min="0" value="0" required class="rounded border px-3 py-2" placeholder="فرق السعر / السعر عند 0">
-          <input name="sort_order" type="number" value="0" class="rounded border px-3 py-2" placeholder="الترتيب">
-          <label class="flex items-center gap-2"><input name="is_available" type="checkbox" value="true" checked> متاح</label>
-          <button class="rounded bg-slate-700 px-4 py-2 font-bold text-white md:col-span-5">إضافة خيار للمجموعة</button>
+          <div class="field-group mb-0">
+            <label class="label" for="op-name-{{ group.id }}">اسم الخيار</label>
+            <input id="op-name-{{ group.id }}" name="name" required class="input" placeholder="مثال: كبير">
+          </div>
+          <div class="field-group mb-0">
+            <label class="label" for="op-price-{{ group.id }}">فرق السعر / السعر عند 0</label>
+            <input id="op-price-{{ group.id }}" name="price_adjustment" type="number" step="0.01" min="0" value="0" required class="input" placeholder="فرق السعر">
+          </div>
+          <div class="field-group mb-0">
+            <label class="label" for="op-sort-{{ group.id }}">الترتيب</label>
+            <input id="op-sort-{{ group.id }}" name="sort_order" type="number" value="0" class="input" placeholder="الترتيب">
+          </div>
+          <div class="field-group mb-0 flex items-end pb-1">
+            <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)"><input name="is_available" type="checkbox" value="true" checked> متاح</label>
+          </div>
+          <button class="btn btn-dark btn-sm" style="grid-column:1/-1">إضافة خيار للمجموعة</button>
         </form>
 
-        <div class="mt-3 space-y-2">
+        <div class="space-y-2">
           {% for option in group.options %}
-            <form method="post" action="/admin/products/{{ product.id }}/options" class="grid gap-3 rounded border border-slate-200 p-3 md:grid-cols-5">
+            <form method="post" action="/admin/products/{{ product.id }}/options" class="panel p-3" style="background:var(--color-bg)">
               {{ csrf_field(request) }}
               <input type="hidden" name="id" value="{{ option.id }}">
               <input type="hidden" name="group_id" value="{{ group.id }}">
-              <input name="name" value="{{ option.name }}" required class="rounded border px-3 py-2 md:col-span-2" placeholder="اسم الخيار">
-              <input name="price_adjustment" type="number" step="0.01" min="0" value="{{ option.price_adjustment }}" required class="rounded border px-3 py-2" placeholder="فرق السعر">
-              <input name="sort_order" type="number" value="{{ option.sort_order }}" class="rounded border px-3 py-2" placeholder="الترتيب">
-              <label class="flex items-center gap-2"><input name="is_available" type="checkbox" value="true" {% if option.is_available %}checked{% endif %}> متاح</label>
-              <div class="flex gap-2 md:col-span-5">
-                <button class="rounded bg-emerald-700 px-4 py-2 text-white">حفظ الخيار</button>
-                <button form="delete-option-{{ option.id }}" class="rounded bg-red-600 px-4 py-2 text-white">حذف الخيار</button>
+              <div class="flex flex-wrap items-end gap-3">
+                <div class="field-group mb-0 flex-1" style="min-width:10rem">
+                  <label class="label" for="op-name-{{ option.id }}">اسم الخيار</label>
+                  <input id="op-name-{{ option.id }}" name="name" value="{{ option.name }}" required class="input" placeholder="اسم الخيار">
+                </div>
+                <div class="field-group mb-0">
+                  <label class="label" for="op-price-{{ option.id }}">فرق السعر</label>
+                  <input id="op-price-{{ option.id }}" name="price_adjustment" type="number" step="0.01" min="0" value="{{ option.price_adjustment }}" required class="input" style="width:8rem" placeholder="فرق السعر">
+                </div>
+                <div class="field-group mb-0">
+                  <label class="label" for="op-sort-{{ option.id }}">الترتيب</label>
+                  <input id="op-sort-{{ option.id }}" name="sort_order" type="number" value="{{ option.sort_order }}" class="input" style="width:6rem" placeholder="الترتيب">
+                </div>
+                <div class="field-group mb-0 flex items-end pb-1">
+                  <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)"><input name="is_available" type="checkbox" value="true" {% if option.is_available %}checked{% endif %}> متاح</label>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button class="btn btn-primary btn-sm">حفظ الخيار</button>
+                  <button form="delete-option-{{ option.id }}" class="btn btn-danger btn-sm">حذف الخيار</button>
+                </div>
               </div>
             </form>
-            <form id="delete-option-{{ option.id }}" method="post" action="/admin/products/{{ product.id }}/options/{{ option.id }}/delete">{{ csrf_field(request) }}</form>
+            <form id="delete-option-{{ option.id }}" method="post" action="/admin/products/{{ product.id }}/options/{{ option.id }}/delete" class="hidden">{{ csrf_field(request) }}</form>
           {% else %}
-            <p class="text-sm text-slate-400">لا توجد خيارات في هذه المجموعة بعد.</p>
+            <p class="text-sm muted">لا توجد خيارات في هذه المجموعة بعد.</p>
           {% endfor %}
         </div>
       </div>
     </div>
   {% else %}
-    <p class="text-sm text-slate-500">لا توجد مجموعات خيارات بعد لهذا المنتج.</p>
+    <div class="empty-state panel">
+      <span class="empty-icon" aria-hidden="true">⚙</span>
+      <p class="empty-title">لا توجد مجموعات خيارات بعد لهذا المنتج</p>
+      <p class="empty-text">أضف مجموعة خيارات من فوق — مثلاً "الحجم" أو "الإضافي".</p>
+    </div>
   {% endfor %}
-</div>
-
-<div class="mt-4">
-  <a href="/admin/products" class="text-sm text-slate-600 hover:text-primary">← العودة للمنتجات</a>
 </div>
 {% endblock %}

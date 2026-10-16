@@ -3,17 +3,53 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>تسجيل الدخول</title>
+  <title>تسجيل الدخول — لوحة التحكم</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/tailwind.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <style>
+    body { background: var(--color-bg); }
+    .login-shell {
+      min-height: 100dvh;
+      display: grid;
+      place-items: center;
+      padding: 1.25rem;
+    }
+    .login-card {
+      width: 100%;
+      max-width: 26rem;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 1.25rem;
+      padding: 2rem;
+      box-shadow: 0 20px 50px -20px rgb(2 6 23 / .18);
+    }
+  </style>
 </head>
-<body class="grid min-h-screen place-items-center bg-slate-100">
-  <form method="post" class="w-full max-w-sm rounded bg-white p-6 shadow-sm">
-    <h1 class="mb-5 text-2xl font-bold">دخول الأدمن</h1>
-    {% if error %}<p class="mb-3 rounded bg-red-50 p-3 text-sm text-red-700">{{ error }}</p>{% endif %}
-    {{ csrf_field(request) }}
-    <input name="username" required class="mb-3 w-full rounded border px-3 py-2" placeholder="اسم المستخدم">
-    <input name="password" type="password" required class="mb-4 w-full rounded border px-3 py-2" placeholder="كلمة المرور">
-    <button class="w-full rounded bg-slate-900 px-4 py-2 font-bold text-white">دخول</button>
-  </form>
+<body>
+  <main class="login-shell">
+    <form method="post" class="login-card">
+      <div class="mb-6 text-center">
+        <div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl text-2xl" style="background:var(--color-primary);color:#fff">🍽</div>
+        <h1 class="text-xl font-extrabold" style="color:var(--color-ink)">لوحة تحكم المطعم</h1>
+        <p class="mt-1 text-sm muted">سجّل دخولك للوصول للوحة الإدارة.</p>
+      </div>
+      {% if error %}
+      <div class="alert alert-danger mb-4">{{ error }}</div>
+      {% endif %}
+      {{ csrf_field(request) }}
+      <div class="mb-3">
+        <label class="label" for="login-username">اسم المستخدم</label>
+        <input id="login-username" name="username" required autocomplete="username" class="input" placeholder="اسم المستخدم">
+      </div>
+      <div class="mb-5">
+        <label class="label" for="login-password">كلمة المرور</label>
+        <input id="login-password" name="password" type="password" required autocomplete="current-password" class="input" placeholder="كلمة المرور">
+      </div>
+      <button type="submit" class="btn btn-primary btn-lg btn-block">دخول</button>
+    </form>
+  </main>
 </body>
 </html>

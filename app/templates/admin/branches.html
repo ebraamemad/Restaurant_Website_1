@@ -1,70 +1,102 @@
 {% extends "admin/base.html" %}
 {% block content %}
-<h1 class="mb-2 text-2xl font-bold">الفروع</h1>
-<p class="mb-5 text-sm text-slate-500">
-  كل طلب لازم يكون مربوط بفرع. الفرع المعطّل بيختفي من صفحة العميل، ومش
-  حد يقدر يطلب منه. الفروع ما بتتحذفش — لو عندها طلبات، عطّلها بس.
-</p>
+<div class="page-header">
+  <div>
+    <h1 class="page-title">الفروع</h1>
+    <p class="page-sub">
+      كل طلب لازم يكون مربوط بفرع. الفرع المعطّل بيختفي من صفحة العميل، ومش
+      حد يقدر يطلب منه. الفروع ما بتتحذفش — لو عندها طلبات، عطّلها بس.
+    </p>
+  </div>
+</div>
 
-<form method="post" class="mb-6 grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-2">
+<form method="post" class="panel p-4 sm:p-6 mb-6 cols" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
   {{ csrf_field(request) }}
-  <input name="name" required class="rounded border px-3 py-2" placeholder="اسم الفرع (مثال: فرع المعادي)">
-  <input name="phone" class="rounded border px-3 py-2" placeholder="التليفون">
-  <input name="address" class="rounded border px-3 py-2 md:col-span-2" placeholder="العنوان">
-  <input name="opening_hours" class="rounded border px-3 py-2 md:col-span-2"
-         placeholder="ساعات العمل للعرض فقط (مثال: 10:00 — 02:00)">
-  <label class="flex items-center gap-2 md:col-span-2">
-    <input name="is_active" type="checkbox" value="true" checked> نشط
-  </label>
-  <button class="rounded bg-slate-900 px-4 py-2 font-bold text-white md:col-span-2">إضافة فرع</button>
+  <div class="field-group mb-0">
+    <label class="label" for="br-name">اسم الفرع</label>
+    <input id="br-name" name="name" required class="input" placeholder="مثال: فرع المعادي">
+  </div>
+  <div class="field-group mb-0">
+    <label class="label" for="br-phone">التليفون</label>
+    <input id="br-phone" name="phone" class="input" placeholder="التليفون">
+  </div>
+  <div class="field-group mb-0" style="grid-column:1/-1">
+    <label class="label" for="br-address">العنوان</label>
+    <input id="br-address" name="address" class="input" placeholder="العنوان">
+  </div>
+  <div class="field-group mb-0" style="grid-column:1/-1">
+    <label class="label" for="br-hours">ساعات العمل (للعرض فقط)</label>
+    <input id="br-hours" name="opening_hours" class="input" placeholder="مثال: 10:00 — 02:00">
+  </div>
+  <div class="field-group mb-0 flex items-end pb-1">
+    <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)">
+      <input name="is_active" type="checkbox" value="true" checked> نشط
+    </label>
+  </div>
+  <button class="btn btn-primary" style="grid-column:1/-1">إضافة فرع</button>
 </form>
 
-<div class="grid gap-4 md:grid-cols-2">
+{% if branches %}
+<div class="cols cols-2">
   {% for branch in branches %}
-    <form method="post" class="rounded bg-white p-4 shadow-sm">
+    <form method="post" class="panel p-4">
       {{ csrf_field(request) }}
       <input type="hidden" name="id" value="{{ branch.id }}">
-      <input name="name" value="{{ branch.name }}" required class="mb-2 w-full rounded border px-3 py-2">
-      <input name="phone" value="{{ branch.phone or '' }}" class="mb-2 w-full rounded border px-3 py-2" placeholder="التليفون">
-      <input name="address" value="{{ branch.address or '' }}" class="mb-2 w-full rounded border px-3 py-2" placeholder="العنوان">
-      <input name="opening_hours" value="{{ branch.opening_hours or '' }}" class="mb-2 w-full rounded border px-3 py-2"
-             placeholder="ساعات العمل (للعرض فقط)">
+      <label class="label" for="br-name-{{ branch.id }}">اسم الفرع</label>
+      <input id="br-name-{{ branch.id }}" name="name" value="{{ branch.name }}" required class="input mb-3">
+      <label class="label" for="br-phone-{{ branch.id }}">التليفون</label>
+      <input id="br-phone-{{ branch.id }}" name="phone" value="{{ branch.phone or '' }}" class="input mb-3" placeholder="التليفون">
+      <label class="label" for="br-address-{{ branch.id }}">العنوان</label>
+      <input id="br-address-{{ branch.id }}" name="address" value="{{ branch.address or '' }}" class="input mb-3" placeholder="العنوان">
+      <label class="label" for="br-hours-{{ branch.id }}">ساعات العمل</label>
+      <input id="br-hours-{{ branch.id }}" name="opening_hours" value="{{ branch.opening_hours or '' }}" class="input mb-3" placeholder="ساعات العمل (للعرض فقط)">
       <div class="mb-3 flex flex-wrap items-center gap-4">
-        <label><input name="is_active" type="checkbox" value="true" {% if branch.is_active %}checked{% endif %}> نشط</label>
+        <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)">
+          <input name="is_active" type="checkbox" value="true" {% if branch.is_active %}checked{% endif %}> نشط
+        </label>
         {% if branch.is_default %}
-          <span class="rounded bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800">الفرع الافتراضي</span>
+          <span class="badge badge-green">الفرع الافتراضي</span>
         {% else %}
-          <button form="default-branch-{{ branch.id }}" class="rounded border border-emerald-700 px-2 py-1 text-xs font-bold text-emerald-700">
+          <button form="default-branch-{{ branch.id }}" class="btn btn-sm btn-outline" style="color:var(--color-primary,#059669)">
             اجعله الافتراضي
           </button>
         {% endif %}
       </div>
-      <button class="rounded bg-emerald-700 px-4 py-2 text-white">حفظ</button>
+      <div class="flex flex-wrap gap-2">
+        <button class="btn btn-primary btn-sm">حفظ</button>
+      </div>
     </form>
     {% if not branch.is_default %}
       <form id="default-branch-{{ branch.id }}" method="post" action="/admin/branches/{{ branch.id }}/default" class="hidden">
         {{ csrf_field(request) }}
       </form>
     {% endif %}
-  {% else %}
-    <p class="text-sm text-slate-500">لم تتم إضافة فروع بعد.</p>
   {% endfor %}
 </div>
+{% else %}
+  <div class="empty-state panel">
+    <span class="empty-icon" aria-hidden="true">🏠</span>
+    <p class="empty-title">لم تتم إضافة فروع بعد</p>
+    <p class="empty-text">أضف أول فرع عشان يبقى فيه مكان للطلبات.</p>
+  </div>
+{% endif %}
 
-<section class="mt-8 rounded border border-amber-200 bg-amber-50 p-4">
-  <h2 class="mb-2 font-bold text-amber-900">ساعات استقبال الطلبات</h2>
-  <p class="mb-3 text-sm text-amber-800">
-    دي على مستوى المطعم كله، مش على مستوى الفرع، عشان كده متظبطةش من هنا.
-    تقدر تعدّلها من <a href="/admin/settings" class="font-bold underline">إعدادات المطعم</a>.
-  </p>
-  {% if settings.ordering_open_time and settings.ordering_close_time %}
-    <p class="text-sm font-bold text-amber-900">
-      الطلبات مفتوحة من {{ settings.ordering_open_time.strftime('%H:%M') }}
-      إلى {{ settings.ordering_close_time.strftime('%H:%M') }}
-      {%- if settings.ordering_open_time > settings.ordering_close_time %} (الراحة بتعدّي نص الليل){% endif %}.
+<section class="mt-8 alert alert-warn">
+  <div>
+    <h2 class="mb-2 font-extrabold" style="color:#92400e">ساعات استقبال الطلبات</h2>
+    <p class="mb-3 text-sm" style="color:#92400e">
+      دي على مستوى المطعم كله، مش على مستوى الفرع، عشان كده متظبطةش من هنا.
+      تقدر تعدّلها من <a href="/admin/settings" class="font-bold underline">إعدادات المطعم</a>.
     </p>
-  {% else %}
-    <p class="text-sm font-bold text-amber-900">المطعم بيقبل الطلبات طول الوقت.</p>
-  {% endif %}
+    {% if settings.ordering_open_time and settings.ordering_close_time %}
+      <p class="text-sm font-bold" style="color:#92400e">
+        الطلبات مفتوحة من {{ settings.ordering_open_time.strftime('%H:%M') }}
+        إلى {{ settings.ordering_close_time.strftime('%H:%M') }}
+        {%- if settings.ordering_open_time > settings.ordering_close_time %} (الراحة بتعدّي نص الليل){% endif %}.
+      </p>
+    {% else %}
+      <p class="text-sm font-bold" style="color:#92400e">المطعم بيقبل الطلبات طول الوقت.</p>
+    {% endif %}
+  </div>
 </section>
 {% endblock %}

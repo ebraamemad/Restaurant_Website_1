@@ -1,80 +1,100 @@
 {% extends "admin/base.html" %}
 {% block content %}
 
-{# ===== سجل الحملات ===== #}
-<div class="flex flex-wrap items-center justify-between gap-3">
+<div class="page-header">
   <div>
-    <h1 class="text-xl font-extrabold sm:text-2xl">سجل الحملات</h1>
-    <p class="mt-1 text-sm text-slate-500">
-      كل حملة اتعملت، بنتيجتها الحقيقية — مش اللي اتخطّط ليها.
-    </p>
+    <h1 class="page-title">سجل الحملات</h1>
+    <p class="page-sub">كل حملة اتعملت، بنتيجتها الحقيقية — مش اللي اتخطّط ليها.</p>
   </div>
-  <a href="/admin/marketing/campaigns" class="text-sm font-bold text-emerald-700 hover:underline">الحملات الحالية</a>
+  <a href="/admin/marketing/campaigns" class="btn btn-outline btn-sm">الحملات الحالية ←</a>
 </div>
 
-<form method="get" action="/admin/marketing/history" class="mt-4 flex flex-wrap gap-2">
-  <input type="search" name="q" value="{{ filters.q or '' }}" placeholder="اسم أو نص"
-         class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
-  <select name="status" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+<form method="get" action="/admin/marketing/history" class="flex flex-wrap gap-2 mb-5">
+  <input type="search" name="q" value="{{ filters.q or '' }}" placeholder="اسم أو نص" class="input sm:max-w-xs">
+  <select name="status" class="select sm:max-w-xs">
     <option value="">كل الحالات</option>
     {% for key, label in status_labels.items() %}
     <option value="{{ key }}" {% if filters.status == key %}selected{% endif %}>{{ label }}</option>
     {% endfor %}
   </select>
-  <select name="channel" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+  <select name="channel" class="select sm:max-w-xs">
     <option value="">كل القنوات</option>
     {% for key, label in channel_labels.items() %}
     <option value="{{ key }}" {% if filters.channel == key %}selected{% endif %}>{{ label }}</option>
     {% endfor %}
   </select>
-  <button type="submit" class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white">فلتر</button>
-  <a href="/admin/marketing/history" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold">مسح</a>
+  <button type="submit" class="btn btn-dark btn-sm">فلتر</button>
+  <a href="/admin/marketing/history" class="btn btn-outline btn-sm">مسح</a>
 </form>
 
-<div class="mt-4 overflow-x-auto rounded-2xl border border-slate-200 bg-white">
-  {% if campaigns %}
-  <table class="w-full min-w-[44rem] text-sm">
-    <thead class="border-b border-slate-200 bg-slate-50 text-right text-xs font-bold text-slate-600">
-      <tr>
-        <th class="px-3 py-2.5">الحملة</th>
-        <th class="px-3 py-2.5">الحالة</th>
-        <th class="px-3 py-2.5">المحاولة</th>
-        <th class="px-3 py-2.5">متبعت</th>
-        <th class="px-3 py-2.5">فشل</th>
-        <th class="px-3 py-2.5">النسبة</th>
-        <th class="px-3 py-2.5">خلصت</th>
-      </tr>
-    </thead>
-    <tbody class="divide-y divide-slate-100">
-      {% for c in campaigns %}
-      <tr class="transition hover:bg-slate-50">
-        <td class="px-3 py-2.5">
-          <a href="/admin/marketing/campaigns/{{ c.id }}" class="font-bold text-emerald-700 hover:underline">{{ c.name }}</a>
-          <div class="text-xs text-slate-500">{{ channel_label(c.channel) or c.channel }} · {{ audience_label(c.audience_type) or c.audience_type }}</div>
-        </td>
-        <td class="px-3 py-2.5 text-slate-600">{{ status_label(c.status) or c.status }}</td>
-        <td class="px-3 py-2.5 text-slate-600">{{ c.total_recipients or '—' }}</td>
-        <td class="px-3 py-2.5 font-bold text-emerald-700">{{ c.sent_count }}</td>
-        <td class="px-3 py-2.5 font-bold {% if c.failed_count %}text-red-700{% else %}text-slate-400{% endif %}">{{ c.failed_count }}</td>
-        <td class="px-3 py-2.5 text-slate-600">
-          {# المقام = اللي حاولنا نبعته، مش `sent + failed`. لو استعملنا
-             المجموع، الـskipped هتختفي والحملة هتبان 100% نجاح. #}
-          {% if c.total_recipients %}
-            {{ (c.sent_count * 100 // c.total_recipients) }}%
-          {% else %}
-            <span class="text-slate-400">—</span>
-          {% endif %}
-        </td>
-        <td class="px-3 py-2.5 text-xs text-slate-500">
-          {{ c.completed_at.strftime('%Y-%m-%d %H:%M') if c.completed_at else '—' }}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <p class="p-6 text-center text-sm text-slate-500">مفيش حملات بالفلتر ده.</p>
-  {% endif %}
+<div class="table-panel">
+  <div class="table-wrap">
+    {% if campaigns %}
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>الحملة</th>
+          <th>الحالة</th>
+          <th>المحاولة</th>
+          <th>متبعت</th>
+          <th>فشل</th>
+          <th>النسبة</th>
+          <th>خلصت</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in campaigns %}
+        <tr>
+          <td>
+            <a href="/admin/marketing/campaigns/{{ c.id }}" class="cell-main no-underline" style="color:var(--color-primary,#059669)">{{ c.name }}</a>
+            <div class="cell-sub">{{ channel_label(c.channel) or c.channel }} · {{ audience_label(c.audience_type) or c.audience_type }}</div>
+          </td>
+          <td>
+            {% if c.status == 'completed' %}
+              <span class="badge badge-green">تمت</span>
+            {% elif c.status in ('partial', 'partially_completed') %}
+              <span class="badge badge-amber">نجحت جزئياً</span>
+            {% elif c.status == 'failed' %}
+              <span class="badge badge-red">فشلت</span>
+            {% elif c.status == 'cancelled' %}
+              <span class="badge badge-slate">ملغاة</span>
+            {% elif c.status == 'sending' %}
+              <span class="badge badge-blue">بتتبعت</span>
+            {% elif c.status == 'scheduled' %}
+              <span class="badge badge-violet">مجدولة</span>
+            {% else %}
+              <span class="badge badge-outline">{{ status_label(c.status) or c.status }}</span>
+            {% endif %}
+          </td>
+          <td class="cell-main">{{ c.total_recipients or '—' }}</td>
+          <td class="cell-main" style="color:var(--color-primary,#059669)">{{ c.sent_count }}</td>
+          <td><span class="cell-main" {% if c.failed_count %}style="color:rgb(220 38 38)"{% endif %}>{{ c.failed_count }}</span></td>
+          <td>
+            {# المقام = اللي حاولنا نبعته، مش `sent + failed`. لو استعملنا
+               المجموع، الـskipped هتختفي والحملة هتبان 100% نجاح. #}
+            {% if c.total_recipients %}
+              <span class="badge {% if c.sent_count * 100 // c.total_recipients >= 90 %}badge-green{% else %}badge-amber{% endif %}">
+                {{ c.sent_count * 100 // c.total_recipients }}%
+              </span>
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td class="cell-sub" style="white-space:nowrap">
+            {{ c.completed_at.strftime('%Y-%m-%d %H:%M') if c.completed_at else '—' }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+      <span class="empty-icon" aria-hidden="true">🕘</span>
+      <p class="empty-title">مفيش حملات بالفلتر ده</p>
+      <p class="empty-text">جرّب فلتر تاني، أو راجع الحملات الحالية.</p>
+    </div>
+    {% endif %}
+  </div>
 </div>
 
 <p class="mt-3 text-xs text-slate-500">{{ total }} نتيجة</p>

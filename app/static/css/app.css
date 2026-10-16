@@ -5,6 +5,12 @@ html{
   max-width:100vw;
 }
 
+/* عشان عارضات الـsticky (هيدر العميل / توب بار الأدمن) ما تخليش
+   عناوين الأقسام مخفية وراها عند القفز على anchor */
+html{
+  scroll-padding-top:4.75rem;
+}
+
 body{
   min-height:100vh;
   overflow-x:clip;
@@ -13,6 +19,7 @@ body{
   padding-left:env(safe-area-inset-left);
   padding-right:env(safe-area-inset-right);
   background:#f6f5f1;
+  font-family:"Cairo", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 img{
@@ -216,3 +223,611 @@ input, textarea, select{
 [x-cloak]{
   display:none !important;
 }
+
+/* ================================================================
+   DESIGN SYSTEM — مشترك بين واجهة العميل ولوحة التحكم
+   ================================================================
+   مبني بـCSS نقي (Tailwind المترجَم في المشروع مجموعة يدوية
+   محدودة من الكلاسات، فأي بُنى جديدة لازم تتعرف هنا).
+   ================================================================ */
+
+:root{
+  /* ألوان النظام — قيم افتراضية. الصفحات اللي ليها theme خاص
+     (base.html بتاع العميل/الأدمن) بتعرّف نفس المتغيرات في <style>
+     جوه الـhead، وده بيغلب القيم دي لأنها بتيجي بعدها في الترتيب.
+     الهدف إن أي صفحة تتحمل لوحدها (زي /admin/login) ما تفضلش
+     بمتغيرات معرّفة → كروت شفافة وحدود ملغية. */
+  --color-bg:#f6f5f1;
+  --color-surface:#ffffff;
+  --color-border:rgb(226 232 240);
+  --color-ink:#0f172a;
+  --color-primary:#059669;
+  --color-secondary:#047857;
+  --color-accent:#f59e0b;
+  --color-primary-rgb:5 150 105;
+  --color-secondary-rgb:4 120 87;
+  --color-accent-rgb:245 158 11;
+
+  --radius:14px;
+  --radius-sm:10px;
+  --radius-lg:22px;
+  --ring:0 0 0 3px color-mix(in srgb, var(--color-primary,#059669) 22%, transparent);
+  --shadow-card:0 1px 2px rgba(15,23,42,.04), 0 6px 20px rgba(15,23,42,.05);
+  --ink:#0f172a;
+}
+
+/* وصول: حلقة تركيز واضحة على كل العناصر التفاعلية */
+:focus-visible{
+  outline:3px solid color-mix(in srgb, var(--color-primary,#059669) 45%, transparent);
+  outline-offset:2px;
+  border-radius:6px;
+}
+
+.skip-link{
+  position:absolute;
+  top:-120px;
+  inset-inline-start:1rem;
+  z-index:200;
+  background:var(--color-primary,#059669);
+  color:#fff;
+  padding:.65rem 1.1rem;
+  border-radius:0 0 12px 12px;
+  font-weight:800;
+  font-size:.85rem;
+  transition:top .18s ease;
+  text-decoration:none;
+}
+.skip-link:focus{ top:0; }
+
+/* ---------- الأزرار ---------- */
+.btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:.5rem;
+  border-radius:12px;
+  padding:.68rem 1.15rem;
+  font-weight:800;
+  font-size:.9rem;
+  line-height:1.2;
+  border:1px solid transparent;
+  cursor:pointer;
+  min-height:44px;
+  white-space:nowrap;
+  text-decoration:none;
+  transition:background .15s ease, color .15s ease, border-color .15s ease,
+             box-shadow .15s ease, transform .15s ease, opacity .15s ease;
+}
+.btn:active{ transform:scale(.98); }
+.btn-primary{ background:var(--color-primary,#059669); color:#fff;
+  box-shadow:0 4px 14px color-mix(in srgb, var(--color-primary,#059669) 28%, transparent); }
+.btn-primary:hover{ background:var(--color-secondary,#047857); }
+.btn-outline{ background:#fff; border-color:rgb(203 213 225); color:rgb(51 65 85); }
+.btn-outline:hover{ border-color:color-mix(in srgb, var(--color-primary,#059669) 55%, #fff);
+  background:color-mix(in srgb, var(--color-primary,#059669) 5%, #fff); }
+.btn-ghost{ background:transparent; color:rgb(71 85 105); }
+.btn-ghost:hover{ background:rgb(241 245 249); }
+.btn-danger{ background:rgb(239 68 68); color:#fff; }
+.btn-danger:hover{ background:rgb(220 38 38); }
+.btn-dark{ background:rgb(15 23 42); color:#fff; }
+.btn-dark:hover{ background:rgb(30 41 59); }
+.btn-sm{ min-height:36px; padding:.45rem .85rem; font-size:.78rem; border-radius:10px; }
+.btn-lg{ min-height:54px; padding:.9rem 1.7rem; font-size:1rem; border-radius:14px; }
+.btn-block{ width:100%; }
+.btn:disabled{ opacity:.55; cursor:not-allowed; transform:none; box-shadow:none; }
+.btn-whatsapp{ background:#25D366; color:#fff; }
+.btn-whatsapp:hover{ background:#1eb857; }
+
+/* ---------- الحقول والاستمارات ---------- */
+.input, .select, .textarea{
+  width:100%;
+  border:1px solid rgb(203 213 225);
+  background:#fff;
+  border-radius:12px;
+  padding:.68rem .9rem;
+  font-size:.95rem;
+  color:var(--ink);
+  min-height:44px;
+  transition:border-color .15s ease, box-shadow .15s ease;
+}
+.input:focus, .select:focus, .textarea:focus{
+  outline:none;
+  border-color:var(--color-primary,#059669);
+  box-shadow:var(--ring);
+}
+.textarea{ min-height:96px; resize:vertical; }
+.label{ display:block; font-size:.78rem; font-weight:800; color:rgb(71 85 105); margin-bottom:.4rem; }
+.field-hint{ display:block; margin-top:.35rem; font-size:.72rem; color:rgb(100 116 139); line-height:1.55; }
+.field-group{ margin-bottom:1.1rem; }
+
+/* ---------- الشارات ---------- */
+.badge{
+  display:inline-flex;
+  align-items:center;
+  gap:.3rem;
+  border-radius:999px;
+  padding:.32rem .75rem;
+  font-size:.72rem;
+  font-weight:800;
+  line-height:1.25;
+  white-space:nowrap;
+}
+.badge-green{ background:rgb(209 250 229); color:rgb(6 95 70); }
+.badge-red{ background:rgb(254 226 226); color:rgb(153 27 27); }
+.badge-amber{ background:rgb(254 243 199); color:rgb(133 77 14); }
+.badge-blue{ background:rgb(219 234 254); color:rgb(30 64 175); }
+.badge-violet{ background:rgb(237 233 254); color:rgb(91 33 182); }
+.badge-slate{ background:rgb(241 245 249); color:rgb(51 65 85); }
+.badge-outline{ background:#fff; border:1px solid rgb(203 213 225); color:rgb(71 85 105); }
+
+/* ---------- التنبيهات ---------- */
+.alert{
+  display:flex;
+  gap:.6rem;
+  align-items:flex-start;
+  border-radius:14px;
+  padding:.95rem 1.05rem;
+  font-size:.86rem;
+  line-height:1.65;
+  border:1px solid transparent;
+}
+.alert-success{ background:rgb(236 253 245); border-color:rgb(167 243 208); color:rgb(6 95 70); }
+.alert-danger{ background:rgb(254 242 242); border-color:rgb(254 202 202); color:rgb(153 27 27); }
+.alert-warn{ background:rgb(255 251 235); border-color:rgb(253 230 138); color:rgb(120 53 15); }
+.alert-info{ background:rgb(239 246 255); border-color:rgb(191 219 254); color:rgb(30 64 175); }
+
+/* ---------- البطاقات واللوحات ---------- */
+.panel{
+  background:#fff;
+  border:1px solid rgb(226 232 240);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow-card);
+  min-width:0;
+}
+.panel-head{
+  padding:1rem 1.25rem;
+  border-bottom:1px solid rgb(241 245 249);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:.75rem;
+  flex-wrap:wrap;
+}
+.panel-title{ font-weight:800; font-size:1rem; color:var(--ink); }
+.panel-body{ padding:1.25rem; }
+
+.stat-card{
+  background:#fff;
+  border:1px solid rgb(226 232 240);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow-card);
+  padding:1.15rem 1.25rem;
+  display:flex;
+  flex-direction:column;
+  gap:.4rem;
+}
+.stat-label{ font-size:.72rem; font-weight:800; color:rgb(100 116 139); letter-spacing:.02em; }
+.stat-value{ font-size:1.75rem; font-weight:800; color:var(--ink);
+  font-variant-numeric:tabular-nums; line-height:1.15; }
+.stat-note{ font-size:.72rem; color:rgb(148 163 184); line-height:1.5; }
+
+/* ---------- الجداول ---------- */
+.table-panel{
+  background:#fff;
+  border:1px solid rgb(226 232 240);
+  border-radius:var(--radius);
+  overflow:hidden;
+  box-shadow:var(--shadow-card);
+  min-width:0;
+}
+.table-wrap{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
+.admin-table{ width:100%; border-collapse:collapse; font-size:.875rem; min-width:640px; }
+.admin-table thead th{
+  text-align:right;
+  font-size:.72rem;
+  font-weight:800;
+  color:rgb(100 116 139);
+  background:rgb(248 250 252);
+  padding:.85rem 1rem;
+  border-bottom:1px solid rgb(226 232 240);
+  white-space:nowrap;
+}
+.admin-table tbody td{
+  padding:.9rem 1rem;
+  border-bottom:1px solid rgb(241 245 249);
+  vertical-align:middle;
+  color:rgb(51 65 85);
+}
+.admin-table tbody tr:last-child td{ border-bottom:none; }
+.admin-table tbody tr{ transition:background .12s ease; }
+.admin-table tbody tr:hover{ background:rgb(248 250 252); }
+.admin-table .num{ direction:ltr; unicode-bidi:embed; font-variant-numeric:tabular-nums; text-align:right; }
+.admin-table .cell-main{ font-weight:800; color:var(--ink); }
+.admin-table .cell-sub{ font-size:.74rem; color:rgb(148 163 184); margin-top:.15rem; }
+
+/* ---------- الحالة الفارغة ورأس الصفحة ---------- */
+.empty-state{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  text-align:center;
+  gap:.6rem;
+  padding:3rem 1.5rem;
+}
+.empty-icon{ font-size:2.6rem; line-height:1; }
+.empty-title{ font-weight:800; font-size:1.02rem; color:rgb(51 65 85); }
+.empty-text{ font-size:.85rem; color:rgb(100 116 139); max-width:27rem; line-height:1.75; }
+.empty-cta{ margin-top:.4rem; }
+
+.page-header{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:1rem;
+  flex-wrap:wrap;
+  margin-bottom:1.3rem;
+}
+.page-title{ font-size:1.35rem; font-weight:800; color:var(--ink); line-height:1.2; }
+.page-sub{ margin-top:.35rem; font-size:.85rem; color:rgb(100 116 139); line-height:1.6; }
+.page-actions{ display:flex; gap:.6rem; flex-wrap:wrap; }
+
+/* ---------- شبكات محتوى غير معتمدة على Tailwind ---------- */
+.cols{ display:grid; gap:1rem; grid-template-columns:1fr; }
+@media (min-width:640px){
+  .cols-2,.cols-3,.cols-4{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (min-width:1024px){
+  .cols-3{ grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .cols-4{ grid-template-columns:repeat(4,minmax(0,1fr)); }
+  .cols-5{ grid-template-columns:repeat(5,minmax(0,1fr)); }
+}
+
+.divide-y > * + *{ border-top:1px solid rgb(241 245 249); }
+.divide-y > *{ min-width:0; }
+.muted{ color:rgb(100 116 139); }
+.text-em{ font-weight:800; }
+
+/* ================================================================
+   لوحة التحكم — الهيكل الجانبي (Sidebar)
+   ================================================================ */
+
+.admin-shell{ min-height:100vh; }
+
+/* الشريط العلوي */
+.admin-topbar{
+  position:sticky;
+  top:0;
+  z-index:40;
+  background:rgba(255,255,255,.92);
+  backdrop-filter:blur(8px);
+  border-bottom:1px solid rgb(226 232 240);
+}
+.admin-topbar-inner{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:.75rem;
+  padding:.65rem 1rem;
+}
+.admin-topbar-brand{
+  display:flex;
+  align-items:center;
+  gap:.65rem;
+  font-weight:800;
+  color:var(--ink);
+  text-decoration:none;
+  font-size:1.02rem;
+}
+.admin-topbar-brand .logo-mini{
+  width:38px; height:38px; border-radius:11px;
+  background:var(--color-primary,#059669);
+  color:#fff; display:inline-flex; align-items:center; justify-content:center;
+  font-size:1.05rem; flex:none;
+}
+.burger{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:44px; height:44px;
+  border-radius:11px;
+  border:1px solid rgb(226 232 240);
+  background:#fff;
+  font-size:1.25rem;
+  cursor:pointer;
+  color:rgb(51 65 85);
+  transition:background .15s ease, border-color .15s ease;
+}
+.burger:hover{ background:rgb(248 250 252); border-color:rgb(203 213 225); }
+@media (min-width:1024px){ .burger{ display:none; } }
+
+/* السايدبار — درج مخفي على الموبايل، ثابت على الديسكتوب.
+   RTL-first: بـ `inset-inline-start:0` السايدبار بيرسي على اليمين
+   في العربي (عكس المرآة لـLTR)، والدرج بينزلق من اليمين (translateX(100%)). */
+.admin-side{
+  position:fixed;
+  top:0; bottom:0; inset-inline-start:0;
+  width:268px;
+  z-index:60;
+  display:flex;
+  flex-direction:column;
+  background:linear-gradient(180deg,#0f172a 0%,#0c1524 100%);
+  color:#cbd5e1;
+  transform:translateX(100%);
+  transition:transform .24s ease;
+  box-shadow:0 0 40px rgba(2,6,23,.4);
+}
+html.sidebar-open .admin-side,
+.admin-side.open{ transform:translateX(0); }
+html.sidebar-open{ overflow:hidden; }
+
+@media (min-width:1024px){
+  .admin-side{ transform:none; box-shadow:none; }
+  html.sidebar-open{ overflow:auto; }
+}
+
+/* خلفية معتمة للدرج (موبايل) */
+.sidebar-backdrop{
+  position:fixed;
+  inset:0;
+  z-index:55;
+  background:rgba(2,6,23,.55);
+  opacity:0;
+  visibility:hidden;
+  transition:opacity .2s ease, visibility .2s ease;
+}
+html.sidebar-open .sidebar-backdrop,
+.sidebar-backdrop.show{ opacity:1; visibility:visible; }
+@media (min-width:1024px){ .sidebar-backdrop{ display:none; } }
+
+.side-brand{
+  display:flex;
+  align-items:center;
+  gap:.75rem;
+  padding:1.1rem 1.2rem;
+  border-bottom:1px solid rgba(255,255,255,.08);
+  text-decoration:none;
+}
+.side-brand .logo{
+  width:42px; height:42px; border-radius:12px;
+  background:linear-gradient(135deg,#10b981,#047857);
+  color:#fff; display:inline-flex; align-items:center; justify-content:center;
+  font-size:1.2rem; flex:none; box-shadow:0 6px 16px rgba(16,185,129,.35);
+}
+.side-brand-name{ font-weight:800; font-size:.98rem; color:#fff; line-height:1.2; }
+.side-brand-sub{ font-size:.66rem; color:#64748b; margin-top:2px; }
+
+.side-nav{
+  flex:1;
+  overflow-y:auto;
+  padding:1.1rem .8rem 1.4rem;
+  display:flex;
+  flex-direction:column;
+  gap:1.15rem;
+  overscroll-behavior:contain;
+}
+.side-group{ display:flex; flex-direction:column; gap:2px; }
+.side-group-title{
+  font-size:.62rem;
+  font-weight:800;
+  letter-spacing:.1em;
+  color:#55637a;
+  text-transform:uppercase;
+  padding:0 .65rem;
+  margin-bottom:.45rem;
+}
+.side-link{
+  display:flex;
+  align-items:center;
+  gap:.7rem;
+  padding:.62rem .75rem;
+  border-radius:10px;
+  color:#cbd5e1;
+  font-size:.85rem;
+  font-weight:700;
+  text-decoration:none;
+  transition:background .14s ease, color .14s ease;
+}
+.side-link:hover{ background:rgba(255,255,255,.07); color:#fff; }
+.side-link.active, .side-link[aria-current="page"]{
+  background:rgba(16,185,129,.16);
+  color:#5eead4;
+}
+.side-link .side-ico{ width:22px; text-align:center; font-size:1rem; flex:none; }
+.side-link .side-arrow{ margin-inline-start:auto; font-size:.7rem; opacity:.5; }
+
+.side-foot{
+  padding:1rem .8rem;
+  border-top:1px solid rgba(255,255,255,.08);
+  display:flex;
+  flex-direction:column;
+  gap:.5rem;
+  background:rgba(2,6,23,.35);
+}
+
+/* زر تثبيت التطبيق داخل السايدبار */
+.side-install{
+  display:flex;
+  align-items:center;
+  gap:.7rem;
+  padding:.62rem .75rem;
+  border-radius:10px;
+  font-size:.85rem;
+  font-weight:800;
+  color:#a7f3d0;
+  background:rgba(16,185,129,.14);
+  border:1px solid rgba(16,185,129,.3);
+  cursor:pointer;
+  text-align:right;
+  transition:background .14s ease;
+}
+.side-install:hover{ background:rgba(16,185,129,.24); }
+.side-install[hidden]{ display:none; }
+
+.side-logout{
+  display:flex;
+  align-items:center;
+  gap:.7rem;
+  width:100%;
+  padding:.62rem .75rem;
+  border-radius:10px;
+  font-size:.85rem;
+  font-weight:700;
+  color:#fca5a5;
+  background:transparent;
+  border:none;
+  cursor:pointer;
+  text-align:right;
+  transition:background .14s ease;
+}
+.side-logout:hover{ background:rgba(239,68,68,.15); color:#fecaca; }
+
+/* منطقة المحتوى — الحواف بتتحكم فيهم قواعد الديسكتوب بالأسفل
+   (margin-inline-start) عشان المحتوى يفضل برا السايدبار. */
+.admin-main{
+  padding:1.25rem 1rem 3rem;
+  max-width:1200px;
+  margin-inline-end:auto;
+}
+
+/* ديسكتوب: المحتوى والتوب-بار بعيدًا عن السايدبار.
+   `inline-start` = اليمين في RTL (السايدبار بيرسي على اليمين).
+   القاعدة دي بعد قاعدة `.admin-main` الأساسية عشان تبقى هي اللي كاسبة في الترتيب. */
+@media (min-width:1024px){
+  .admin-topbar{ margin-inline-start:268px; }
+  .admin-main{
+    margin-inline-start:268px;
+    margin-inline-end:auto;
+    padding:1.6rem 1.9rem 3.5rem;
+  }
+}
+
+/* ================================================================
+   مركز التسويق — معالج خطوات (WHO→WHAT→HOW→WHEN→REVIEW)
+   ================================================================ */
+
+.wizard-nav{
+  display:flex;
+  gap:.45rem;
+  flex-wrap:wrap;
+  margin-bottom:1.3rem;
+}
+.wizard-step{
+  display:flex;
+  align-items:center;
+  gap:.55rem;
+  padding:.5rem .95rem;
+  border-radius:999px;
+  border:1px solid rgb(226 232 240);
+  background:#fff;
+  font-size:.8rem;
+  font-weight:800;
+  color:rgb(100 116 139);
+  opacity:.75;
+  transition:opacity .15s ease, border-color .15s ease, background .15s ease, color .15s ease;
+  cursor:pointer;
+}
+.wizard-step:hover{ opacity:1; }
+.wizard-step .wizard-num{
+  width:26px; height:26px; border-radius:999px;
+  background:rgb(241 245 249);
+  display:inline-flex; align-items:center; justify-content:center;
+  font-size:.74rem; color:rgb(100 116 139); flex:none;
+}
+.wizard-step.current{
+  opacity:1;
+  border-color:var(--color-primary,#059669);
+  color:var(--color-primary,#059669);
+  background:color-mix(in srgb, var(--color-primary,#059669) 7%, #fff);
+}
+.wizard-step.current .wizard-num{ background:var(--color-primary,#059669); color:#fff; }
+.wizard-step.done{ opacity:1; color:rgb(6 95 70); border-color:rgb(167 243 208); background:rgb(236 253 245); }
+.wizard-step.done .wizard-num{ background:rgb(6 95 70); color:#fff; }
+
+.wizard-panel{ display:none; }
+.wizard-panel.active{ display:block; animation:reveal-up .3s ease both; }
+
+.wizard-option{
+  display:block;
+  position:relative;
+  width:100%;
+  text-align:right;
+  background:#fff;
+  border:2px solid rgb(226 232 240);
+  border-radius:var(--radius);
+  padding:1.05rem 1.2rem;
+  cursor:pointer;
+  transition:border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+.wizard-option:hover{ border-color:color-mix(in srgb, var(--color-primary,#059669) 45%, #f8fafc); }
+.wizard-option.selected{
+  border-color:var(--color-primary,#059669);
+  box-shadow:var(--ring);
+  background:color-mix(in srgb, var(--color-primary,#059669) 4%, #fff);
+}
+.wizard-option input{ position:absolute; opacity:0; pointer-events:none; }
+.wizard-option .wo-title{ font-weight:800; color:var(--ink); font-size:.95rem; }
+.wizard-option .wo-desc{ font-size:.78rem; color:rgb(100 116 139); margin-top:.28rem; line-height:1.6; }
+.wizard-option .wo-check{
+  position:absolute;
+  top:1.1rem;
+  inset-inline-end:1.1rem;
+  width:24px; height:24px;
+  border-radius:999px;
+  border:2px solid rgb(203 213 225);
+  display:inline-flex; align-items:center; justify-content:center;
+  font-size:.8rem; color:#fff;
+  transition:background .15s ease, border-color .15s ease;
+  background:#fff;
+}
+.wizard-option.selected .wo-check{ background:var(--color-primary,#059669); border-color:var(--color-primary,#059669); }
+
+.wizard-footer{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:.75rem;
+  flex-wrap:wrap;
+  margin-top:1.4rem;
+  padding-top:1.2rem;
+  border-top:1px solid rgb(226 232 240);
+}
+
+/* ملخص المراجعة الشبيه بالرسالة الحقيقية */
+.msg-preview{
+  border-radius:var(--radius);
+  background:#fff;
+  border:1px solid rgb(226 232 240);
+  box-shadow:var(--shadow-card);
+  overflow:hidden;
+}
+.msg-preview-head{
+  display:flex;
+  align-items:center;
+  gap:.6rem;
+  padding:.8rem 1rem;
+  background:rgb(248 250 252);
+  border-bottom:1px solid rgb(241 245 249);
+  font-size:.72rem;
+  font-weight:800;
+  color:rgb(100 116 139);
+}
+.msg-preview-app{ width:30px; height:30px; border-radius:9px; background:var(--color-primary,#059669); color:#fff;
+  display:inline-flex; align-items:center; justify-content:center; flex:none; }
+.msg-preview-body{ padding:1.1rem 1.2rem; }
+.msg-preview-title{ font-weight:800; font-size:1rem; color:var(--ink); }
+.msg-preview-text{ margin-top:.4rem; font-size:.88rem; color:rgb(71 85 105); line-height:1.75; white-space:pre-line; }
+.msg-preview-link{ margin-top:.7rem; display:inline-flex; align-items:center; gap:.4rem;
+  color:var(--color-primary,#059669); font-weight:800; font-size:.85rem; text-decoration:none; }
+
+/* بطاقة فحص حالة واتساب */
+.status-item{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:.75rem;
+  padding:.55rem 0;
+  border-bottom:1px dashed rgb(226 232 240);
+}
+.status-item:last-child{ border-bottom:none; }
+.status-item .lbl{ font-size:.82rem; color:rgb(71 85 105); }
+.status-item .val{ font-weight:800; color:var(--ink); font-size:.86rem; }

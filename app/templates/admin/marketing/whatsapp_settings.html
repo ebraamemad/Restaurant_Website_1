@@ -5,28 +5,22 @@
    الصفحة دي **بتتحفظ**، مش بتبعت. زر الإرسال في صفحة الحملة
    هو اللي بيبعت — والفرق بين الزرارين هو اللي بيمنع "جرّب
    بسرعة على 3000 عميل". #}
-<div class="flex flex-wrap items-center justify-between gap-3">
+<div class="page-header">
   <div>
-    <h1 class="text-xl font-extrabold sm:text-2xl">إعدادات واتساب</h1>
-    <p class="mt-1 text-sm text-slate-500">
-      المزوّد، الإيقاع، والقفلين. **مفيش إرسال من هنا.**
-    </p>
+    <h1 class="page-title">إعدادات واتساب</h1>
+    <p class="page-sub">المزوّد، الإيقاع، والقفلين. مفيش إرسال من هنا أبداً.</p>
   </div>
-  <a href="/admin/marketing/campaigns"
-     class="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-bold transition hover:bg-slate-50">
-    الحملات
-  </a>
+  <a href="/admin/marketing/campaigns" class="btn btn-outline btn-sm">الحملات ←</a>
 </div>
 
 {# نتيجة آخر عملية. `note` و `state` رموز من قاموس في
    `marketing_whatsapp` — ما فيش نص من المزوّد في الرابط. #}
 {% if note_text %}
-<div class="mt-4 rounded-2xl border p-4 text-sm font-bold
-  {% if note_tone == 'ok' %}border-emerald-200 bg-emerald-50 text-emerald-800
-  {% elif note_tone == 'bad' %}border-red-200 bg-red-50 text-red-800
-  {% else %}border-amber-200 bg-amber-50 text-amber-800{% endif %}">
-  <div>{{ note_text }}</div>
-  {% if state_label %}<div class="mt-1 font-normal" dir="auto">{{ state_label }}</div>{% endif %}
+<div class="alert mb-4 {% if note_tone == 'ok' %}alert-success text-emerald-800{% elif note_tone == 'bad' %}alert-danger text-red-800{% else %}alert-warn text-amber-800{% endif %}">
+  <span>
+    <div>{{ note_text }}</div>
+    {% if state_label %}<div class="mt-1 opacity-80" dir="auto">{{ state_label }}</div>{% endif %}
+  </span>
 </div>
 {% endif %}
 
@@ -34,11 +28,13 @@
    القيمة المتلفّة نفسها — غير كده الأدمن يشوف رسالة من غير
    ما يعرف يغيّر إيه. #}
 {% if problem %}
-<div class="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4">
-  <div class="text-sm font-bold text-red-800">الرابط المحفوظ مش صالح</div>
-  <div class="mt-1 text-sm text-red-700" dir="auto">{{ problem }}</div>
-  <div class="mt-1 text-xs text-red-600" dir="ltr">{{ raw_row.base_url if raw_row else '' }}</div>
-  <div class="mt-2 text-xs font-bold text-red-800">صلّحه من تحت واحفظ.</div>
+<div class="alert alert-danger mb-4">
+  <span>
+    <strong>الرابط المحفوظ مش صالح.</strong>
+    <div class="mt-1">{{ problem }}</div>
+    <div class="mt-1 text-xs opacity-80" dir="ltr">{{ raw_row.base_url if raw_row else '' }}</div>
+    <div class="mt-2 font-extrabold">صلّحه من تحت واحفظ.</div>
+  </span>
 </div>
 {% endif %}
 
@@ -51,190 +47,189 @@
 {% set batch = row.batch_size if row else 20 %}
 {% set retries = row.max_retries if row else 2 %}
 
-<form method="post" action="/admin/marketing/whatsapp"
-      class="mt-4 space-y-4 rounded-2xl border border-slate-200 bg-white p-4">
-  {{ csrf_field(request) }}
+<div class="panel p-4 sm:p-6">
+  <form method="post" action="/admin/marketing/whatsapp">
+    {{ csrf_field(request) }}
 
-  {# ===== القفلين =====
-     منفصلين عن قصد: الأول يسمح للمعاينة والاختبار، التاني هو
-     اللي بيفتح الإرسال لحملة فيها آلاف. #}
-  <div class="grid gap-3 sm:grid-cols-2">
-    <label class="flex items-start gap-2 rounded-xl border border-slate-200 p-3">
-      <input type="checkbox" name="enabled" {% if enabled %}checked{% endif %} class="mt-1">
-      <span>
-        <span class="block text-sm font-bold">القناة مفعّلة</span>
-        <span class="block text-xs text-slate-500">
-          لازم `<code>WHATSAPP_ENABLED=true</code>` في السيرفر كمان. القفلين مع بعض.
+    {# ===== القفلين =====
+       منفصلين عن قصد: الأول يسمح للمعاينة والاختبار، التاني هو
+       اللي بيفتح الإرسال لحملة فيها آلاف. #}
+    <div class="cols cols-2">
+      <label class="wizard-option">
+        <span class="flex items-start gap-3">
+          <input type="checkbox" name="enabled" {% if enabled %}checked{% endif %} class="mt-1 h-5 w-5">
+          <span>
+            <span class="wo-title">القناة مفعّلة</span>
+            <span class="wo-desc">تسمح بالمعاينة والاختبار. لازم <code>WHATSAPP_ENABLED=true</code> في السيرفر كمان — القفلين مع بعض.</span>
+          </span>
         </span>
-      </span>
-    </label>
-    <label class="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50/50 p-3">
-      <input type="checkbox" name="sending_enabled" {% if sending %}checked{% endif %} class="mt-1">
-      <span>
-        <span class="block text-sm font-bold text-red-800">الإرسال مسموح</span>
-        <span class="block text-xs text-red-700">
-          من غير ده، حملة واتساب بتتقفل قبل ما تتلمس. افتحه لما تكون جاهيز.
+      </label>
+      <label class="wizard-option">
+        <span class="flex items-start gap-3">
+          <input type="checkbox" name="sending_enabled" {% if sending %}checked{% endif %} class="mt-1 h-5 w-5">
+          <span>
+            <span class="wo-title">الإرسال مسموح</span>
+            <span class="wo-desc">من غير ده، حملة واتساب بتتقفل قبل ما تتلمس. افتحه لما تكون جاهيز.</span>
+          </span>
         </span>
-      </span>
-    </label>
-  </div>
-
-  {# ===== المزوّد ===== #}
-  <div class="grid gap-3 sm:grid-cols-2">
-    <label class="block">
-      <span class="text-xs font-bold text-slate-600">رابط المزوّد (Evolution)</span>
-      <input type="text" name="base_url" dir="ltr" value="{{ base_url }}"
-             placeholder="https://evolution.example.com"
-             class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-    </label>
-    <label class="block">
-      <span class="text-xs font-bold text-slate-600">اسم الـinstance</span>
-      <input type="text" name="instance" dir="ltr" value="{{ instance }}"
-             placeholder="main"
-             class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-    </label>
-  </div>
-
-  <div class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-    <div class="font-bold">المفتاح مش هنا</div>
-    <div class="mt-1 text-xs leading-5">
-      `EVOLUTION_API_KEY` بيتقرأ من بيئة السيرفر بس. مالوش عمود في
-      الداتابيز — عشان مايتنسخش في backup ولا يظهر في تقرير.
-      {% if config %}
-        <div class="mt-1" dir="ltr">{{ config.api_key_masked or 'غير مضبوط' }}</div>
-      {% endif %}
+      </label>
     </div>
-  </div>
 
-  {# ===== الإيقاع =====
-     الفاصل بين الرسايل: أهم رقم في الشاشة دي. #}
-  <div class="grid gap-3 sm:grid-cols-3">
-    <label class="block">
-      <span class="text-xs font-bold text-slate-600">فاصل بين الرسايل (ms)</span>
-      <input type="number" name="message_interval_ms" min="{{ min_interval_ms }}" max="{{ max_interval_ms }}"
-             value="{{ interval }}"
-             class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-      <span class="mt-1 block text-xs text-slate-500">صفر = بلا فاصل. مش بنصح بيه.</span>
-    </label>
-    <label class="block">
-      <span class="text-xs font-bold text-slate-600">حجم الدفعة</span>
-      <input type="number" name="batch_size" min="1" max="{{ max_batch_size }}"
-             value="{{ batch }}"
-             class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-      <span class="mt-1 block text-xs text-slate-500">الحد الأقصى {{ max_batch_size }}.</span>
-    </label>
-    <label class="block">
-      <span class="text-xs font-bold text-slate-600">إعادة المحاولة</span>
-      <input type="number" name="max_retries" min="0" max="{{ max_retries }}"
-             value="{{ retries }}"
-             class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-      <span class="mt-1 block text-xs text-slate-500">لأخطاء المزوّد المؤقتة بس.</span>
-    </label>
-  </div>
+    {# ===== المزوّد ===== #}
+    <div class="cols cols-2 mt-6">
+      <div>
+        <label class="label" for="wa-base-url">رابط المزوّد (Evolution)</label>
+        <input id="wa-base-url" type="text" name="base_url" dir="ltr" value="{{ base_url }}"
+               placeholder="https://evolution.example.com" class="input">
+      </div>
+      <div>
+        <label class="label" for="wa-instance">اسم الـinstance</label>
+        <input id="wa-instance" type="text" name="instance" dir="ltr" value="{{ instance }}"
+               placeholder="main" class="input">
+      </div>
+    </div>
 
-  <button type="submit"
-          class="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800">
-    احفظ
-  </button>
-</form>
+    <div class="alert alert-warn mt-4">
+      <span>
+        <strong>المفتاح مش هنا:</strong>
+        <div class="mt-1 text-xs">
+          <code>EVOLUTION_API_KEY</code> بيتقرأ من بيئة السيرفر بس. مالوش عمود في الداتابيز —
+          عشان مايتنسخش في backup ولا يظهر في تقرير.
+          {% if config %}<div class="mt-1" dir="ltr">{{ config.api_key_masked or 'غير مضبوط' }}</div>{% endif %}
+        </div>
+      </span>
+    </div>
+
+    {# ===== الإيقاع =====
+       الفاصل بين الرسايل: أهم رقم في الشاشة دي. #}
+    <div class="cols cols-3 mt-6">
+      <div>
+        <label class="label" for="wa-interval">فاصل بين الرسايل (ms)</label>
+        <input id="wa-interval" type="number" name="message_interval_ms" min="{{ min_interval_ms }}" max="{{ max_interval_ms }}"
+               value="{{ interval }}" class="input">
+        <span class="field-hint">صفر = بلا فاصل. مش بنصح بيه.</span>
+      </div>
+      <div>
+        <label class="label" for="wa-batch">حجم الدفعة</label>
+        <input id="wa-batch" type="number" name="batch_size" min="1" max="{{ max_batch_size }}"
+               value="{{ batch }}" class="input">
+        <span class="field-hint">الحد الأقصى {{ max_batch_size }}.</span>
+      </div>
+      <div>
+        <label class="label" for="wa-retries">إعادة المحاولة</label>
+        <input id="wa-retries" type="number" name="max_retries" min="0" max="{{ max_retries }}"
+               value="{{ retries }}" class="input">
+        <span class="field-hint">لأخطاء المزوّد المؤقتة بس.</span>
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-dark mt-6">احفظ الإعدادات</button>
+  </form>
+</div>
 
 {# ===== حالة الإعدادات ===== #}
-{% if config %}
-<div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-  <h2 class="font-extrabold">الحالة دلوقتي</h2>
-  <div class="mt-2 grid gap-2 text-sm sm:grid-cols-2">
-    <div class="flex items-center justify-between gap-2">
-      <span class="text-slate-500">جاهز للإرسال</span>
-      <span class="font-bold {% if config.ready %}text-emerald-700{% else %}text-amber-700{% endif %}">
-        {{ 'أيوه' if config.ready else 'لأ' }}
+<div class="panel mt-4">
+  <div class="panel-head">
+    <h2 class="panel-title">الحالة دلوقتي</h2>
+  </div>
+  <div class="panel-body">
+    {% if config %}
+    <div class="cols cols-2">
+      <div class="status-item">
+        <span class="lbl">جاهز للإرسال</span>
+        <span class="badge {% if config.ready %}badge-green{% else %}badge-amber{% endif %}">
+          {{ 'أيوه' if config.ready else 'لأ' }}
+        </span>
+      </div>
+      <div class="status-item">
+        <span class="lbl">المزوّد</span>
+        <span class="val" dir="ltr">{{ config.provider }}</span>
+      </div>
+      <div class="status-item">
+        <span class="lbl">المفتاح</span>
+        <span class="badge {% if config.has_api_key %}badge-green{% else %}badge-red{% endif %}">
+          {{ 'موجود' if config.has_api_key else 'ناقص' }}
+        </span>
+      </div>
+      <div class="status-item">
+        <span class="lbl">الفاصل</span>
+        <span class="val" dir="ltr">{{ config.message_interval_ms }} ms</span>
+      </div>
+    </div>
+    {% if not config.ready %}
+    <div class="alert alert-warn mt-4">
+      <span>
+        لسه مش جاهز للإرسال. اتأكد إن المفتاح موجود في بيئة السيرفر،
+        وإن رابط المزوّد واسم الـinstance صح، وشغّل "القناة مفعّلة"
+        و"الإرسال مسموح" من فوق.
       </span>
     </div>
-    <div class="flex items-center justify-between gap-2">
-      <span class="text-slate-500">المزوّد</span>
-      <span class="font-bold" dir="ltr">{{ config.provider }}</span>
-    </div>
-    <div class="flex items-center justify-between gap-2">
-      <span class="text-slate-500">المفتاح</span>
-      <span class="font-bold {% if config.has_api_key %}text-emerald-700{% else %}text-red-700{% endif %}">
-        {{ 'موجود' if config.has_api_key else 'ناقص' }}
-      </span>
-    </div>
-    <div class="flex items-center justify-between gap-2">
-      <span class="text-slate-500">الفاصل</span>
-      <span class="font-bold" dir="ltr">{{ config.message_interval_ms }} ms</span>
-    </div>
+    {% endif %}
+    {% else %}
+    <p class="muted text-sm">الإعدادات هتظهر هنا أول ما تحفظ صفحة.</p>
+    {% endif %}
   </div>
-  {% if not config.ready %}
-  <div class="mt-3 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-800">
-    ناقص: {{ config.missing }}
-  </div>
-  {% endif %}
 </div>
-{% endif %}
 
 {# ===== فحص الاتصال =====
    POST بيخزّنش حاجة — النموذج بيبعت نتيجة في الرابط وترجع
    الصفحة توريها. زرار "اتصال" بيعدّلش الـconfig. #}
-<form method="post" action="/admin/marketing/whatsapp/test-connection"
-      class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-  {{ csrf_field(request) }}
-  <div class="flex flex-wrap items-center justify-between gap-3">
+<div class="panel mt-4">
+  <form method="post" action="/admin/marketing/whatsapp/test-connection" class="flex flex-wrap items-center justify-between gap-3 p-4">
+    {{ csrf_field(request) }}
     <div>
       <h2 class="font-extrabold">فحص الاتصال</h2>
       <p class="text-xs text-slate-500">بيسأل المزوّد عن حالة الـinstance. مش بيبعت رسالة.</p>
     </div>
     <button type="submit" {% if not config or not config.has_api_key %}disabled{% endif %}
-            class="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">
-      افحص
-    </button>
-  </div>
-</form>
+            class="btn btn-dark">افحص</button>
+  </form>
+</div>
 
 {# ===== رسالة اختبار =====
    رقم واحد، رسالة واحدة، ومفيش سطر في الداتابيز. الرقم
    الافتراضي من البيئة عشان الغلط في خانة الاسم مابقاش بيكتب
    على زبون. #}
-<form method="post" action="/admin/marketing/whatsapp/send-test"
-      class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-  {{ csrf_field(request) }}
-  <h2 class="font-extrabold">رسالة اختبار</h2>
-  <p class="mt-1 text-xs text-slate-500">
-    بتروح لرقم واحد سطر. **مش** بتتسجّل ولا بتأثر على أي عميل.
-  </p>
-  <div class="mt-3 grid gap-3 sm:grid-cols-2">
-    <label class="block">
-      <span class="text-xs font-bold text-slate-600">الرقم</span>
-      <input type="text" name="phone" dir="ltr" value="{{ phone }}"
-             placeholder="01000000000"
-             class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-    </label>
-    <label class="block">
-      <span class="text-xs font-bold text-slate-600">النص</span>
-      <input type="text" name="body" dir="auto" value="{{ message }}"
-             maxlength="1000"
-             class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-    </label>
-  </div>
-  <button type="submit" {% if not config or not config.sending_enabled %}disabled{% endif %}
-          class="mt-3 rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">
-    ابعت رسالة اختبار
-  </button>
-  {% if not config or not config.sending_enabled %}
-  <div class="mt-2 text-xs font-bold text-amber-700">
-    محتاج تشغّل "الإرسال مسموح" الأول — نفس القفل بتاع الحملات.
-  </div>
-  {% endif %}
-</form>
+<div class="panel mt-4">
+  <form method="post" action="/admin/marketing/whatsapp/send-test" class="p-4 sm:p-6">
+    {{ csrf_field(request) }}
+    <h2 class="font-extrabold">رسالة اختبار</h2>
+    <p class="mt-1 text-xs text-slate-500">
+      بتروح لرقم واحد بس. <strong>مش</strong> بتتسجّل ولا بتأثر على أي عميل.
+    </p>
+    <div class="cols cols-2 mt-4">
+      <div>
+        <label class="label" for="test-phone">الرقم</label>
+        <input id="test-phone" type="text" name="phone" dir="ltr" value="{{ phone }}"
+               placeholder="01000000000" class="input">
+      </div>
+      <div>
+        <label class="label" for="test-body">النص</label>
+        <input id="test-body" type="text" name="body" dir="auto" value="{{ message }}"
+               maxlength="1000" class="input">
+      </div>
+    </div>
+    <button type="submit" {% if not config or not config.sending_enabled %}disabled{% endif %}
+            class="btn btn-whatsapp mt-4">ابعت رسالة اختبار</button>
+    {% if not config or not config.sending_enabled %}
+    <div class="field-hint font-bold" style="color:rgb(146 64 14)">
+      محتاج تشغّل "الإرسال مسموح" الأول — نفس القفل بتاع الحملات.
+    </div>
+    {% endif %}
+  </form>
+</div>
 
 {# ===== الحد الصريح ===== #}
-<div class="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
-  <div class="font-bold">الواجهة دي مش واجهة واتساب رسمي</div>
-  <p class="mt-1 text-xs leading-6">
-    `Evolution API` غير رسمي. ولا فاصل ولا احترام `429` ولا أي حاجة
-    في الكود بتضمن إن رقمك مش هيتحظر. اللي بنعمله: إرسال متباعد،
-    احترام رفض الإذن، سجل كامل، وإلغاء فوري. لو محتاج ضمان
-    تعاقدي، استخدم مزوّد رسمي.
-  </p>
+<div class="alert alert-danger mt-4">
+  <span>
+    <strong>الواجهة دي مش واجهة واتساب رسمي.</strong>
+    <div class="mt-1 text-xs leading-6">
+      <code>Evolution API</code> غير رسمي. ولا فاصل ولا احترام <code>429</code> ولا أي
+      حاجة في الكود بتضمن إن رقمك مش هيتحظر. اللي بنعمله: إرسال متباعد،
+      احترام رفض الإذن، سجل كامل، وإلغاء فوري. لو محتاج ضمان تعاقدي،
+      استخدم مزوّد رسمي.
+    </div>
+  </span>
 </div>
 
 {% endblock %}

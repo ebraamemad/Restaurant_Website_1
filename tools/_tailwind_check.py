@@ -1,0 +1,5 @@
+import pathlib
+tailwind = pathlib.Path(r"app\static\css\tailwind.css").read_text(encoding="utf-8", errors="replace")
+checks = ["text-emerald-800","text-red-800","text-amber-800","text-amber-900","text-slate-900","text-slate-800","text-slate-700","text-slate-600","text-slate-500","space-y-1","space-y-2","space-y-3","space-y-6","space-y-1.5","gap-x-5","gap-y-2","mt-5","mt-4","mt-3","mt-2","mt-1","mt-0.5","pt-3","pt-4","opacity-80","whitespace-pre-line","leading-7","hover:bg-slate-50","hover:text-emerald-700","bg-slate-50","border-slate-100","w-14","h-14","h-5","w-5","text-left","no-underline","truncate","break-words","border-slate-200","bg-amber-50","p-2.5","max-w-\[60%\]","max-w-6xl","w-10","h-10","shrink-0","border-slate-200/70","bg-white/85","backdrop-blur","px-3.5","py-2.5","px-3","lg:hidden","sm:px-4"]
+for c in checks:
+    print(f"{c}: {'YES' if c in tailwind else 'NO'}")

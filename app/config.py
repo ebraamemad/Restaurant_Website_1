@@ -288,6 +288,10 @@ def normalize_vapid_public_key(value: str) -> str:
     بيقبل الصيغتين اللي في التداول: 64 بايت (نقطة P-256 من غير الـprefix)
     و65 بايت (مع `0x04` في الأول). لو 65، الـprefix بيتشال لأننا بنرجّعه
     لـ`.env`-style value ونضيفه تاني عند التسليم للمتصفح.
+
+    الطبيعي في `.env` هو **64 بايت** (X‖Y بلا prefix). ومعيار `0x04`
+    بيتشال **بس** من تمثيل الـ65 بايت، لأن أول بايت في مفتاح 64 بايت
+    ممكن يكون `0x04` نفسه من غير ما يبقى prefix.
     """
     stripped = value.strip()
     if stripped.startswith("-----BEGIN PUBLIC KEY"):
@@ -300,7 +304,10 @@ def normalize_vapid_public_key(value: str) -> str:
             raw = raw[1:]
         return _b64url_encode(raw)
     raw = _b64url_decode(stripped)
-    if raw.startswith(_UNCOMPRESSED_POINT_PREFIX):
+    # الـprefix بيتشال **بس** من النقطة غير المضغوطة الحقيقية (65 بايت).
+    # مفتاح X‖Y خام (64 بايت) ممكن يبدأ بـ0x04 بالصدفة، وشيله بيقصّره
+    # لـ63 بايت وبيرفضه — وده كان بيطفي الإشعارات عشوائياً (~1/256).
+    if len(raw) == 65 and raw.startswith(_UNCOMPRESSED_POINT_PREFIX):
         raw = raw[1:]
     if len(raw) != 64:
         raise ValueError(f"مفتاح VAPID العام لازم يكون 64 بايت، فعلي={len(raw)}")
@@ -373,9 +380,12 @@ def get_vapid_public_key_browser() -> str | None:
     if not normalized:
         return None
     raw = _b64url_decode(normalized)
-    if not raw.startswith(_UNCOMPRESSED_POINT_PREFIX):
-        raw = _UNCOMPRESSED_POINT_PREFIX + raw
-    return _b64url_encode(raw)
+    # `get_vapid_public_key` مضمون **64 بايت (X‖Y) من غير prefix**، فبندّي
+    # المتصفح النقطة كاملة بـ`0x04` في الأول دايماً. الفحص القديم
+    # (`if not raw.startswith(0x04)`) كان بيسيب المفتاح 64 بايت لما أول
+    # بايت من X يطلع `0x04` بالصدفة (~1/256)، و`subscribe()` بيقلب
+    # InvalidAccessError من غير أي رسالة واضحة للمستخدم.
+    return _b64url_encode(_UNCOMPRESSED_POINT_PREFIX + raw)
 
 
 def push_is_configured() -> bool:

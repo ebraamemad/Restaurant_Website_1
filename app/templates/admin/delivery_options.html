@@ -1,68 +1,153 @@
 {% extends "admin/base.html" %}
 {% block content %}
-<h1 class="mb-5 text-2xl font-bold">طرق التوصيل والاستلام</h1>
-<form method="post" class="mb-6 grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-2">
+<div class="page-header">
+  <div>
+    <h1 class="page-title">طرق التوصيل والاستلام</h1>
+    <p class="page-sub">الخيارات اللي بيشوفها العميل وقت الاستلام — التوصيل أو الاستلام من المطعم.</p>
+  </div>
+</div>
+
+<form method="post" class="panel p-4 sm:p-6 mb-6 cols" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
   {{ csrf_field(request) }}
-  <input name="name" required class="rounded border px-3 py-2" placeholder="الاسم (مثال: توصيل / استلام من المطعم)">
-  <select name="delivery_type" class="rounded border px-3 py-2">
-    <option value="fixed">توصيل ثابت</option>
-    <option value="pickup">استلام من المطعم</option>
-    <option value="zone">توصيل حسب المنطقة</option>
-    <option value="call_center">طلب عبر مركز الاتصال (الرسوم تُحدد لاحقًا)</option>
-  </select>
-  <input name="fee" type="number" step="0.01" min="0" value="0" class="rounded border px-3 py-2" placeholder="رسوم التوصيل">
-  <input name="estimated_time" class="rounded border px-3 py-2" placeholder="الوقت المتوقع (مثال: 30-45 دقيقة)">
-  <input name="sort_order" type="number" value="0" class="rounded border px-3 py-2" placeholder="الترتيب">
-  <label class="flex items-center gap-2 md:col-span-2"><input name="is_active" type="checkbox" value="true" checked> نشط</label>
-  <button class="rounded bg-slate-900 px-4 py-2 font-bold text-white md:col-span-2">إضافة طريقة</button>
+  <div class="field-group mb-0">
+    <label class="label" for="do-name">الاسم</label>
+    <input id="do-name" name="name" required class="input" placeholder="مثال: توصيل / استلام من المطعم">
+  </div>
+  <div class="field-group mb-0">
+    <label class="label" for="do-type">النوع</label>
+    <select id="do-type" name="delivery_type" class="select">
+      <option value="fixed">توصيل ثابت</option>
+      <option value="pickup">استلام من المطعم</option>
+      <option value="zone">توصيل حسب المنطقة</option>
+      <option value="call_center">طلب عبر مركز الاتصال (الرسوم تُحدد لاحقًا)</option>
+    </select>
+  </div>
+  <div class="field-group mb-0">
+    <label class="label" for="do-fee">رسوم التوصيل</label>
+    <input id="do-fee" name="fee" type="number" step="0.01" min="0" value="0" class="input" placeholder="رسوم التوصيل">
+  </div>
+  <div class="field-group mb-0">
+    <label class="label" for="do-time">الوقت المتوقع</label>
+    <input id="do-time" name="estimated_time" class="input" placeholder="مثال: 30-45 دقيقة">
+  </div>
+  <div class="field-group mb-0">
+    <label class="label" for="do-sort">الترتيب</label>
+    <input id="do-sort" name="sort_order" type="number" value="0" class="input" placeholder="الترتيب">
+  </div>
+  <div class="field-group mb-0 flex items-end pb-1">
+    <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)"><input name="is_active" type="checkbox" value="true" checked> نشط</label>
+  </div>
+  <button class="btn btn-primary" style="grid-column:1/-1">إضافة طريقة</button>
 </form>
-<div class="grid gap-4 md:grid-cols-2">
+
+<div class="cols cols-2">
   {% for option in options %}
-    <form method="post" class="rounded bg-white p-4 shadow-sm">
+    <form method="post" class="panel p-4">
       {{ csrf_field(request) }}
       <input type="hidden" name="id" value="{{ option.id }}">
-      <input name="name" value="{{ option.name }}" required class="mb-2 w-full rounded border px-3 py-2">
-      <div class="mb-2 grid grid-cols-2 gap-2">
-        <label class="text-sm text-slate-600">النوع
-          <select name="delivery_type" class="mt-1 w-full rounded border px-3 py-2">
+      <label class="label" for="do-name-{{ option.id }}">الاسم</label>
+      <input id="do-name-{{ option.id }}" name="name" value="{{ option.name }}" required class="input mb-3">
+      <div class="cols cols-2 mb-3">
+        <div class="field-group mb-0">
+          <label class="label" for="do-type-{{ option.id }}">النوع</label>
+          <select id="do-type-{{ option.id }}" name="delivery_type" class="select">
             <option value="fixed" {% if option.delivery_type == "fixed" %}selected{% endif %}>توصيل ثابت</option>
             <option value="pickup" {% if option.delivery_type == "pickup" %}selected{% endif %}>استلام من المطعم</option>
             <option value="zone" {% if option.delivery_type == "zone" %}selected{% endif %}>توصيل حسب المنطقة</option>
             <option value="call_center" {% if option.delivery_type == "call_center" %}selected{% endif %}>مركز الاتصال (الرسوم تُحدد لاحقًا)</option>
           </select>
-        </label>
-        <label class="text-sm text-slate-600">الترتيب
-          <input name="sort_order" type="number" value="{{ option.sort_order }}" class="mt-1 w-full rounded border px-3 py-2">
-        </label>
+        </div>
+        <div class="field-group mb-0">
+          <label class="label" for="do-sort-{{ option.id }}">الترتيب</label>
+          <input id="do-sort-{{ option.id }}" name="sort_order" type="number" value="{{ option.sort_order }}" class="input">
+        </div>
       </div>
       {# حقل الرسوم كان ناقص من فورم التعديل: أي تعديل بيحفظ الرسوم بصفر،
          فلو الأدمن عدّل اسم طريقة بس رجعت الرسوم لـ0 من غير ما ينتبه. #}
-      <label class="mb-2 block text-sm text-slate-600">رسوم التوصيل
-        <input name="fee" type="number" step="0.01" min="0" value="{{ option.fee }}" class="mt-1 w-full rounded border px-3 py-2">
-      </label>
-      <input name="estimated_time" value="{{ option.estimated_time or '' }}" class="mb-2 w-full rounded border px-3 py-2" placeholder="الوقت المتوقع">
-      <div class="mb-3 flex gap-4">
-        <label><input name="is_active" type="checkbox" value="true" {% if option.is_active %}checked{% endif %}> نشط</label>
+      <div class="field-group mb-3">
+        <label class="label" for="do-fee-{{ option.id }}">رسوم التوصيل</label>
+        <input id="do-fee-{{ option.id }}" name="fee" type="number" step="0.01" min="0" value="{{ option.fee }}" class="input">
       </div>
-      <button class="rounded bg-emerald-700 px-4 py-2 text-white">حفظ</button>
-      <button form="delete-option-{{ option.id }}" class="rounded bg-red-600 px-4 py-2 text-white">تعطيل</button>
+      <label class="label" for="do-time-{{ option.id }}">الوقت المتوقع</label>
+      <input id="do-time-{{ option.id }}" name="estimated_time" value="{{ option.estimated_time or '' }}" class="input mb-3" placeholder="الوقت المتوقع">
+      <div class="mb-3 flex gap-4">
+        <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)">
+          <input name="is_active" type="checkbox" value="true" {% if option.is_active %}checked{% endif %}> نشط
+        </label>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button class="btn btn-primary btn-sm">حفظ</button>
+        <button form="delete-option-{{ option.id }}" class="btn btn-danger btn-sm">تعطيل</button>
+      </div>
     </form>
     <form id="delete-option-{{ option.id }}" method="post" action="/admin/delivery-options/{{ option.id }}/delete">{{ csrf_field(request) }}</form>
   {% endfor %}
 </div>
+
 <section class="mt-8">
-  <h2 class="mb-2 text-xl font-bold">مناطق التوصيل</h2>
-  <p class="mb-4 text-sm text-slate-500">أضف منطقة إذا كانت رسوم التوصيل تختلف حسب المكان. عند اختيارها في الطلب، تستخدم رسوم المنطقة بدل الرسوم الثابتة.</p>
-  <form method="post" action="/admin/delivery-zones" class="mb-4 grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-4">
-    {{ csrf_field(request) }}
-    <input name="name" required class="rounded border px-3 py-2" placeholder="اسم المنطقة، مثال: الفيوم">
-    <input name="fee" type="number" step="0.01" min="0" value="0" class="rounded border px-3 py-2" placeholder="رسوم التوصيل">
-    <input name="sort_order" type="number" min="0" value="0" class="rounded border px-3 py-2" placeholder="ترتيب الظهور">
-    <label class="flex items-center gap-2"><input name="is_active" type="checkbox" value="true" checked> تظهر للعميل</label>
-    <button class="rounded bg-slate-900 px-4 py-2 font-bold text-white md:col-span-4">إضافة منطقة</button>
-  </form>
-  <div class="grid gap-3 md:grid-cols-2">
-    {% for zone in zones %}<form method="post" action="/admin/delivery-zones" class="grid gap-2 rounded bg-white p-4 shadow-sm sm:grid-cols-4">{{ csrf_field(request) }}<input type="hidden" name="id" value="{{ zone.id }}"><input name="name" value="{{ zone.name }}" class="rounded border px-2 py-2"><input name="fee" type="number" step="0.01" min="0" value="{{ zone.fee }}" class="rounded border px-2 py-2"><input name="sort_order" type="number" min="0" value="{{ zone.sort_order }}" class="rounded border px-2 py-2"><label class="flex items-center gap-2 text-sm"><input name="is_active" type="checkbox" value="true" {% if zone.is_active %}checked{% endif %}> ظاهرة</label><button class="rounded bg-emerald-700 px-3 py-2 text-white sm:col-span-2">حفظ</button><button form="delete-zone-{{ zone.id }}" class="rounded bg-red-600 px-3 py-2 text-white sm:col-span-2">تعطيل</button></form><form id="delete-zone-{{ zone.id }}" method="post" action="/admin/delivery-zones/{{ zone.id }}/delete">{{ csrf_field(request) }}</form>{% else %}<p class="text-sm text-slate-500">لم تتم إضافة مناطق بعد.</p>{% endfor %}
+  <div class="page-header">
+    <div>
+      <h2 class="page-title">مناطق التوصيل</h2>
+      <p class="page-sub">أضف منطقة إذا كانت رسوم التوصيل تختلف حسب المكان. عند اختيارها في الطلب، تستخدم رسوم المنطقة بدل الرسوم الثابتة.</p>
+    </div>
   </div>
+  <form method="post" action="/admin/delivery-zones" class="panel p-4 mb-4 cols" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+    {{ csrf_field(request) }}
+    <div class="field-group mb-0">
+      <label class="label" for="dz-name">اسم المنطقة</label>
+      <input id="dz-name" name="name" required class="input" placeholder="مثال: الفيوم">
+    </div>
+    <div class="field-group mb-0">
+      <label class="label" for="dz-fee">رسوم التوصيل</label>
+      <input id="dz-fee" name="fee" type="number" step="0.01" min="0" value="0" class="input" placeholder="رسوم التوصيل">
+    </div>
+    <div class="field-group mb-0">
+      <label class="label" for="dz-sort">ترتيب الظهور</label>
+      <input id="dz-sort" name="sort_order" type="number" min="0" value="0" class="input" placeholder="ترتيب الظهور">
+    </div>
+    <div class="field-group mb-0 flex items-end pb-1">
+      <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)"><input name="is_active" type="checkbox" value="true" checked> تظهر للعميل</label>
+    </div>
+    <button class="btn btn-primary" style="grid-column:1/-1">إضافة منطقة</button>
+  </form>
+
+  {% if zones %}
+  <div class="cols cols-2">
+  {% for zone in zones %}
+    <form method="post" action="/admin/delivery-zones" class="panel p-4">
+      {{ csrf_field(request) }}
+      <input type="hidden" name="id" value="{{ zone.id }}">
+      <div class="cols cols-2 mb-3">
+        <div class="field-group mb-0">
+          <label class="label" for="dz-name-{{ zone.id }}">المنطقة</label>
+          <input id="dz-name-{{ zone.id }}" name="name" value="{{ zone.name }}" class="input">
+        </div>
+        <div class="field-group mb-0">
+          <label class="label" for="dz-fee-{{ zone.id }}">الرسوم</label>
+          <input id="dz-fee-{{ zone.id }}" name="fee" type="number" step="0.01" min="0" value="{{ zone.fee }}" class="input">
+        </div>
+        <div class="field-group mb-0">
+          <label class="label" for="dz-sort-{{ zone.id }}">الترتيب</label>
+          <input id="dz-sort-{{ zone.id }}" name="sort_order" type="number" min="0" value="{{ zone.sort_order }}" class="input">
+        </div>
+        <div class="field-group mb-0 flex items-end pb-1">
+          <label class="flex items-center gap-2 text-sm font-bold" style="color:var(--color-ink)"><input name="is_active" type="checkbox" value="true" {% if zone.is_active %}checked{% endif %}> ظاهرة</label>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button class="btn btn-primary btn-sm">حفظ</button>
+        <button form="delete-zone-{{ zone.id }}" class="btn btn-danger btn-sm">تعطيل</button>
+      </div>
+    </form>
+    <form id="delete-zone-{{ zone.id }}" method="post" action="/admin/delivery-zones/{{ zone.id }}/delete" class="hidden">{{ csrf_field(request) }}</form>
+  {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state panel">
+    <span class="empty-icon" aria-hidden="true">📍</span>
+    <p class="empty-title">لم تتم إضافة مناطق بعد</p>
+    <p class="empty-text">لو رسومك ثابتة في كل مكان،مش محتاج مناطق.</p>
+  </div>
+  {% endif %}
 </section>
 {% endblock %}

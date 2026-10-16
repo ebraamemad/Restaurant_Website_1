@@ -2,121 +2,157 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>لوحة التحكم</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}لوحة تحكم المطعم{% endblock %}</title>
+  <meta name="theme-color" content="#059669">
   <link rel="stylesheet" href="/static/css/tailwind.css">
-  <style>:root{--color-primary-rgb:5 150 105;--color-secondary-rgb:4 120 87;--color-accent-rgb:245 158 11}</style>
-  <link rel="manifest" href="/manifest.json">
+  <script defer src="/static/js/alpine.min.js"></script>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@200..1000&display=swap" rel="stylesheet">
+  <style>
+    :root{--color-primary:#059669;--color-secondary:#047857;--color-accent:#f59e0b;
+      --color-primary-rgb:5 150 105;--color-secondary-rgb:4 120 87;--color-accent-rgb:245 158 11;}
+    @media (min-width:1024px){ .topbar-brand-mobile{ display:none; } }
+  </style>
+  {# PWA الخاصة بلوحة التحكم: لوحة الأدمن هي اللي بتتثبّت (start_url=/admin).
+     صفحة العميل مش بتعرض manifest — عشان تفضل "موقع عادي" مش installable. #}
+  <link rel="manifest" href="/static/admin-manifest.json">
   <link rel="icon" href="/static/favicon.png" type="image/png">
-  <meta name="theme-color" content="#10b981">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="mobile-web-app-capable" content="yes">
 </head>
-<body dir="rtl" class="bg-[#f6f5f1] text-slate-950">
-<nav class="border-b border-slate-200 bg-white/95 backdrop-blur">
-    <div class="mx-auto flex max-w-6xl flex-col gap-2 px-3 py-3 sm:px-4">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <a href="/admin" class="text-lg font-extrabold text-emerald-700 sm:text-xl">لوحة المطعم</a>
-        <div class="flex flex-wrap gap-1.5 text-xs font-semibold sm:gap-2 sm:text-sm">
-          <a href="/admin" class="rounded-full px-2.5 py-2 transition hover:bg-slate-100 sm:px-3 {% if request.url.path == '/admin' %}bg-slate-100{% endif %}">الرئيسية</a>
-          <a href="/admin/categories" class="rounded-full px-2.5 py-2 transition hover:bg-slate-100 sm:px-3 {% if request.url.path.startswith('/admin/categories') %}bg-slate-100{% endif %}">الأقسام</a>
-          <a href="/admin/products" class="rounded-full px-2.5 py-2 transition hover:bg-slate-100 sm:px-3 {% if request.url.path.startswith('/admin/products') %}bg-slate-100{% endif %}">المنتجات</a>
-        </div>
-      </div>
-      <div class="flex flex-wrap gap-1 text-xs font-semibold sm:gap-2 sm:text-sm">
-          <a href="/admin/orders" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/orders') %}bg-slate-100{% endif %}">الطلبات</a>
-          <a href="/admin/customers" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/customers') %}bg-slate-100{% endif %}">العملاء</a>
-          <a href="/admin/marketing" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/marketing') %}bg-slate-100{% endif %}">التسويق</a>
-          <a href="/admin/delivery-options" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/delivery-options') %}bg-slate-100{% endif %}">التوصيل والاستلام</a>
-          <a href="/admin/payment-methods" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/payment-methods') %}bg-slate-100{% endif %}">طرق الدفع</a>
-          <a href="/admin/branches" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/branches') %}bg-slate-100{% endif %}">الفروع</a>
-          <a href="/admin/settings" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/settings') %}bg-slate-100{% endif %}">الإعدادات</a>
-          <a href="/admin/coupons" class="rounded-full px-2 py-1.5 transition hover:bg-slate-100 sm:px-3 sm:py-2 {% if request.url.path.startswith('/admin/coupons') %}bg-slate-100{% endif %}">الكوبونات</a>
-        <a href="#" id="admin-install-btn" class="rounded-full px-2.5 py-2 transition bg-emerald-100 text-emerald-700 hover:bg-emerald-200 sm:px-3" style="display:none">📱 تثبيت</a>
-        <form method="post" action="/admin/logout">{{ csrf_field(request) }}<button class="rounded-full px-2.5 py-2 text-red-600 transition hover:bg-red-50 sm:px-3">خروج</button></form>
-      </div>
+<body dir="rtl">
+<a href="#admin-main" class="skip-link">تخطَّ إلى المحتوى</a>
+
+<div class="admin-shell">
+
+  {# ===== الشريط العلوي ===== #}
+  <header class="admin-topbar">
+    <div class="admin-topbar-inner">
+      <button type="button" id="sidebar-toggle" class="burger" aria-label="فتح القائمة" aria-expanded="false" aria-controls="admin-side">
+        ☰
+      </button>
+      <a href="/admin" class="admin-topbar-brand topbar-brand-mobile">
+        <span class="logo-mini" aria-hidden="true">🍽</span>
+        لوحة المطعم
+      </a>
+      <div class="text-xs font-bold text-slate-400 hidden sm:block">مرحباً بك في لوحة إدارة المطعم</div>
     </div>
-  </nav>
-  <main class="mx-auto max-w-6xl px-3 py-4 sm:px-4 sm:py-6">
+  </header>
+
+  {# ===== السايدبار ===== #}
+  <aside id="admin-side" class="admin-side" aria-label="قائمة التنقل الرئيسية">
+    <a href="/admin" class="side-brand">
+      <span class="logo" aria-hidden="true">🍽</span>
+      <span>
+        <span class="side-brand-name">لوحة المطعم</span>
+        <span class="side-brand-sub side-brand-sub">إدارة و تسويق</span>
+      </span>
+    </a>
+
+    <nav class="side-nav">
+      {# ---------- نظرة عامة ---------- #}
+      <div class="side-group">
+        <a href="/admin" class="side-link {% if request.url.path == '/admin' %}active{% endif %}">
+          <span class="side-ico" aria-hidden="true">▦</span> الرئيسية
+        </a>
+      </div>
+
+      {# ---------- الطلبات والعملاء ---------- #}
+      <div class="side-group">
+        <h3 class="side-group-title">الطلبات والعملاء</h3>
+        <a href="/admin/orders" class="side-link {% if request.url.path.startswith('/admin/orders') %}active{% endif %}">
+          <span class="side-ico" aria-hidden="true">📋</span> الطلبات
+        </a>
+        <a href="/admin/customers" class="side-link {% if request.url.path.startswith('/admin/customers') %}active{% endif %}">
+          <span class="side-ico" aria-hidden="true">👥</span> العملاء
+        </a>
+      </div>
+
+      {# ---------- القائمة ---------- #}
+      <div class="side-group">
+        <h3 class="side-group-title">القائمة</h3>
+        <a href="/admin/products" class="side-link {% if request.url.path.startswith('/admin/products') %}active{% endif %}">
+          <span class="side-ico" aria-hidden="true">🍕</span> المنتجات
+        </a>
+        <a href="/admin/categories" class="side-link {% if request.url.path.startswith('/admin/categories') %}active{% endif %}">
+          <span class="side-ico" aria-hidden="true">🗂</span> الأقسام
+        </a>
+      </div>
+
+      {# ---------- العمليات ---------- #}
+      <div class="side-group">
+        <h3 class="side-group-title">العمليات</h3>
+        <a href="/admin/branches" class="side-link {% if request.url.path.startswith('/admin/branches') %}active{% endif %}">
+          <span class="side-ico" aria-hidden="true">🏬</span> الفروع
+        </a>
+        <a href="/admin/delivery-options" class="side-link {% if request.url.path.startswith('/admin/delivery-options') %}active{% endif %}">
+          <span class="side-ico" aria-hidden="true">🛵</span> التوصيل
+        </a>
+        <a href="/admin/payment-methods" class="side-link {% if request.url.path.startswith('/admin/payment-methods') %}active{% endif %}">
+          <span class="side-ico" aria-hidden="true">💳</span> طرق الدفع
+        </a>
+        <a href="/admin/coupons" class="side-link {% if request.url.path.startswith('/admin/coupons') %}active{% endif %}">
+          <span class="side-ico" aria-hidden="true">🎟</span> الكوبونات
+        </a>
+      </div>
+
+      {# ---------- التسويق ---------- #}
+      <div class="side-group">
+        <h3 class="side-group-title">التسويق</h3>
+        <a href="/admin/marketing" class="side-link {% if request.url.path == '/admin/marketing' %}active{% endif %}">
+          <span class="side-ico" aria-hidden="true">📣</span> مركز التسويق
+        </a>
+        <a href="/admin/marketing/campaigns" class="side-link {% if request.url.path.startswith('/admin/marketing/campaigns') %}active{% endif %}">
+          <span class="side-ico" aria-hidden="true">📨</span> الحملات
+        </a>
+        <a href="/admin/marketing/history" class="side-link {% if request.url.path.startswith('/admin/marketing/history') %}active{% endif %}">
+          <span class="side-ico" aria-hidden="true">🕘</span> سجل الحملات
+        </a>
+        <a href="/admin/marketing/import" class="side-link {% if request.url.path.startswith('/admin/marketing/import') %}active{% endif %}">
+          <span class="side-ico" aria-hidden="true">📥</span> استيراد العملاء
+        </a>
+        <a href="/admin/marketing/whatsapp" class="side-link {% if request.url.path.startswith('/admin/marketing/whatsapp') %}active{% endif %}">
+          <span class="side-ico" aria-hidden="true">💬</span> إعدادات واتساب
+        </a>
+      </div>
+
+      {# ---------- الإعدادات ---------- #}
+      <div class="side-group">
+        <h3 class="side-group-title">الإعدادات</h3>
+        <a href="/admin/settings" class="side-link {% if request.url.path.startswith('/admin/settings') %}active{% endif %}">
+          <span class="side-ico" aria-hidden="true">⚙</span> إعدادات المطعم
+        </a>
+      </div>
+    </nav>
+
+    <div class="side-foot">
+      <button type="button" id="admin-install-btn" class="side-install" style="display:none">
+        <span class="side-ico" aria-hidden="true">📱</span> تثبيت التطبيق
+      </button>
+      <form method="post" action="/admin/logout">
+        {{ csrf_field(request) }}
+        <button type="submit" class="side-logout">
+          <span class="side-ico" aria-hidden="true">⏻</span> تسجيل الخروج
+        </button>
+      </form>
+    </div>
+  </aside>
+
+  {# خلفية الدرج على الموبايل #}
+  <div id="sidebar-backdrop" class="sidebar-backdrop" hidden></div>
+
+  {# ===== المحتوى ===== #}
+  <main id="admin-main" class="admin-main">
     {% block content %}{% endblock %}
   </main>
 
-  <script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
-    });
-  }
-
-  const isPWAInstalled = () =>
-    window.matchMedia('(display-mode: standalone)').matches ||
-    window.navigator.standalone === true;
-
-  window.addEventListener('beforeinstallprompt', (e) => {
-    if (isPWAInstalled()) return;
-    e.preventDefault();
-    window.deferredPrompt = e;
-    const banner = document.getElementById('pwa-install-banner');
-    if (banner) {
-      banner.classList.remove('hidden');
-      banner.classList.add('flex');
-    }
-  });
-
-  window.addEventListener('appinstalled', () => {
-    window.deferredPrompt = null;
-    const banner = document.getElementById('pwa-install-banner');
-    if (banner) {
-      banner.classList.add('hidden');
-      banner.classList.remove('flex');
-    }
-  });
-
-  function dismissPWAInstall() {
-    const banner = document.getElementById('pwa-install-banner');
-    if (banner) {
-      banner.classList.add('hidden');
-      banner.classList.remove('flex');
-    }
-  }
-
-  async function installPWA() {
-    if (isIOS()) {
-      var iosDiv = document.getElementById('pwa-install-ios');
-      if (iosDiv) { iosDiv.classList.remove('hidden'); iosDiv.classList.add('flex'); }
-      return;
-    }
-    if (!window.deferredPrompt) return;
-    window.deferredPrompt.prompt();
-    const { outcome } = await window.deferredPrompt.userChoice;
-    window.deferredPrompt = null;
-    dismissPWAInstall();
-  }
-  document.addEventListener('DOMContentLoaded', function() {
-    var installBtn = document.getElementById('admin-install-btn');
-    if (installBtn) {
-      installBtn.addEventListener('click', function(e) {
-        e.preventDefault();
-        installPWA();
-      });
-    }
-  });
-
-  // تأكيد قبل الإجراءات الصعبة: إرسال حملة، إلغاؤها، استيراد عملاء.
-  //
-  // **دي راحة البال مش أمان.** الحماية الحقيقية على الـserver:
-  // `send_campaign` بيرفض أي حالة غير `scheduled`/`draft`، فدوس
-  // زرار مرتين بيبعت مرة واحدة بس. الـconfirm بيمنع الدوسة
-  // المتعمّدة، مش السريعة.
-  document.addEventListener('submit', function(e) {
-    var message = e.target.getAttribute && e.target.getAttribute('data-confirm');
-    if (message && !window.confirm(message)) {
-      e.preventDefault();
-    }
-  }, true);
-</script>
-
-<div id="pwa-install-banner" class="fixed bottom-0 left-0 right-0 z-50 hidden flex-col items-center gap-3 bg-white p-4 shadow-[0_-4px_20px_rgba(0,0,0,0.15)]">
+  {# ===== PWA: التسجيل وبنر التثبيت ===== #}
+  <div id="pwa-install-banner" class="fixed bottom-0 left-0 right-0 z-50 hidden flex-col items-center gap-3 bg-white p-4 shadow-[0_-4px_20px_rgba(0,0,0,0.15)]" style="display:none">
     <p class="text-sm font-semibold">أضف لوحة التحكم إلى شاشتك الرئيسية</p>
     <div id="pwa-install-android">
       <div class="flex gap-3">
@@ -127,31 +163,125 @@
     <div id="pwa-install-ios" class="hidden flex-col items-center gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
       <p class="text-sm font-semibold text-slate-800">لتثبيت لوحة التحكم على iPhone:</p>
       <ol class="text-sm text-slate-600 space-y-1 text-center">
-        <li>1. اضغط Share</li>
+        <li>1. اضغط زر Share</li>
         <li>2. اختر Add to Home Screen</li>
         <li>3. اضغط Add</li>
       </ol>
       <button onclick="dismissPWAInstall()" class="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-600 mt-2">لاحقًا</button>
     </div>
   </div>
+
   <script>
+  // ===== الـSidebar (درج الموبايل) =====
+  (function () {
+    var side = document.getElementById('admin-side');
+    var toggle = document.getElementById('sidebar-toggle');
+    var backdrop = document.getElementById('sidebar-backdrop');
+    if (!side || !toggle) return;
+
+    function open() {
+      document.documentElement.classList.add('sidebar-open');
+      side.classList.add('open');
+      if (backdrop) backdrop.hidden = false;
+      toggle.setAttribute('aria-expanded', 'true');
+    }
+    function close() {
+      document.documentElement.classList.remove('sidebar-open');
+      side.classList.remove('open');
+      if (backdrop) backdrop.hidden = true;
+      toggle.setAttribute('aria-expanded', 'false');
+    }
+    toggle.addEventListener('click', function () {
+      if (document.documentElement.classList.contains('sidebar-open')) close(); else open();
+    });
+    backdrop.addEventListener('click', close);
+    // إغلاق الدرج بعد اختيار صفحة على الموبايل
+    side.addEventListener('click', function (e) {
+      if (e.target.closest('a')) close();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') close();
+    });
+    window.addEventListener('resize', function () {
+      if (window.innerWidth >= 1024) close();
+    });
+  })();
+
+  // ===== تسجيل الـService Worker من الجذر (scope كامل) =====
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
+
+  // ===== PWA: التثبيت =====
+  const isPWAInstalled = () =>
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.navigator.standalone === true;
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    if (isPWAInstalled()) return;
+    e.preventDefault();
+    window.deferredPrompt = e;
+    const banner = document.getElementById('pwa-install-banner');
+    if (banner) { banner.classList.remove('hidden'); banner.classList.add('flex'); }
+  });
+
+  window.addEventListener('appinstalled', () => {
+    window.deferredPrompt = null;
+    const banner = document.getElementById('pwa-install-banner');
+    if (banner) { banner.classList.add('hidden'); banner.classList.remove('flex'); }
+  });
+
+  function dismissPWAInstall() {
+    const banner = document.getElementById('pwa-install-banner');
+    if (banner) { banner.classList.add('hidden'); banner.classList.remove('flex'); }
+  }
+
   function isIOS() {
     return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   }
-  if (isIOS() && !isPWAInstalled()) {
-    var androidDiv = document.getElementById('pwa-install-android');
-    var iosDiv = document.getElementById('pwa-install-ios');
-    if (androidDiv) { androidDiv.classList.add('hidden'); androidDiv.classList.remove('flex'); }
-    if (iosDiv) { iosDiv.classList.remove('hidden'); iosDiv.classList.add('flex'); }
+
+  async function installPWA() {
+    if (isIOS()) {
+      var iosDiv = document.getElementById('pwa-install-ios');
+      if (iosDiv) { iosDiv.classList.remove('hidden'); iosDiv.classList.add('flex'); }
+      return;
+    }
+    if (!window.deferredPrompt) {
+      var iosDiv2 = document.getElementById('pwa-install-ios');
+      if (iosDiv2) { iosDiv2.classList.remove('hidden'); iosDiv2.classList.add('flex'); }
+      return;
+    }
+    window.deferredPrompt.prompt();
+    await window.deferredPrompt.userChoice;
+    window.deferredPrompt = null;
+    dismissPWAInstall();
   }
-  if (!isPWAInstalled()) {
+
+  document.addEventListener('DOMContentLoaded', function () {
     var installBtn = document.getElementById('admin-install-btn');
-    if (installBtn) { installBtn.style.display = ''; }
-  }
-  window.addEventListener('appinstalled', function() {
-    var installBtn = document.getElementById('admin-install-btn');
-    if (installBtn) { installBtn.style.display = 'none'; }
+    if (installBtn) {
+      if (isPWAInstalled()) {
+        installBtn.hidden = true;
+      } else {
+        installBtn.style.display = '';
+        installBtn.addEventListener('click', installPWA);
+      }
+    }
+    if (isIOS() && !isPWAInstalled()) {
+      var androidDiv = document.getElementById('pwa-install-android');
+      var iosDiv = document.getElementById('pwa-install-ios');
+      if (androidDiv) { androidDiv.classList.add('hidden'); androidDiv.classList.remove('flex'); }
+      if (iosDiv) { iosDiv.classList.remove('hidden'); iosDiv.classList.add('flex'); }
+    }
   });
-</script>
+
+  // تأكيد قبل الإجراءات الصعبة: إرسال حملة، إلغاؤها، استيراد عملاء.
+  document.addEventListener('submit', function (e) {
+    var message = e.target.getAttribute && e.target.getAttribute('data-confirm');
+    if (message && !window.confirm(message)) e.preventDefault();
+  }, true);
+  </script>
 </body>
 </html>

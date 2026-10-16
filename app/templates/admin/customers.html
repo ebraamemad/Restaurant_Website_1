@@ -1,56 +1,71 @@
 {% extends "admin/base.html" %}
 {% block content %}
-<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+<div class="page-header">
   <div>
-    <h1 class="mb-4 text-xl font-bold sm:text-2xl">العملاء</h1>
+    <h1 class="page-title">العملاء</h1>
+    <p class="page-sub">ابحث، فلتر، وصدر قاعدة العملاء.</p>
   </div>
-  <div class="flex flex-wrap gap-2">
-    {# `range` هنا ناقص من الرابط، فلو الأدمن اختار "آخر 30 يوم" وفلترت
-       بيه وقعد ينزّل CSV، الملف بيطلع فيه كل العملاء مش الفترة المعروضة
-       على الشاشة. لازم كل filter معروض في الصفحة يتبعت مع التصدير. #}
-    <a href="/admin/customers/export?sort={{ sort }}&range={{ range or 'all' }}{% if q %}&q={{ q }}{% endif %}{% if min_orders %}&min_orders={{ min_orders }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}" class="rounded bg-slate-900 px-4 py-2 text-sm font-bold text-white">⬇ تصدير CSV</a>
-  </div>
+  {# `range` هنا ناقص من الرابط، فلو الأدمن اختار "آخر 30 يوم" وفلترت
+     بيه وقعد ينزّل CSV، الملف بيطلع فيه كل العملاء مش الفترة المعروضة
+     على الشاشة. لازم كل filter معروض في الصفحة يتبعت مع التصدير. #}
+  <a href="/admin/customers/export?sort={{ sort }}&range={{ range or 'all' }}{% if q %}&q={{ q }}{% endif %}{% if min_orders %}&min_orders={{ min_orders }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}" class="btn btn-dark">⬇ تصدير CSV</a>
 </div>
-<form method="get" class="mb-5 grid gap-3 rounded bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-5">
-  <input type="text" name="q" value="{{ q }}" class="rounded-lg border px-3 py-2.5" placeholder="ابحث بالاسم أو رقم الهاتف">
-  <select name="sort" class="rounded-lg border px-3 py-2.5">
-    <option value="spent" {% if sort == "spent" %}selected{% endif %}>الأكثر إنفاقًا</option>
-    <option value="orders" {% if sort == "orders" %}selected{% endif %}>الأكثر طلبًا</option>
-    <option value="last" {% if sort == "last" %}selected{% endif %}>الأحدث</option>
-  </select>
-  <select name="range" class="rounded-lg border px-3 py-2.5">
-    <option value="all" {% if range == "all" %}selected{% endif %}>كل الوقت</option>
-    <option value="7d" {% if range == "7d" %}selected{% endif %}>آخر 7 أيام</option>
-    <option value="30d" {% if range == "30d" %}selected{% endif %}>آخر 30 يوم</option>
-  </select>
-  <select name="min_orders" class="rounded-lg border px-3 py-2.5">
-    <option value="" {% if not min_orders %}selected{% endif %}>كل العملاء</option>
-    <option value="1" {% if min_orders == 1 %}selected{% endif %}>1+ طلب</option>
-    <option value="2" {% if min_orders == 2 %}selected{% endif %}>2+ طلب</option>
-    <option value="3" {% if min_orders == 3 %}selected{% endif %}>3+ طلب</option>
-    <option value="5" {% if min_orders == 5 %}selected{% endif %}>5+ طلب</option>
-    <option value="10" {% if min_orders == 10 %}selected{% endif %}>10+ طلب</option>
-  </select>
-  <button class="rounded-lg bg-slate-900 px-4 py-2.5 font-bold text-white">تصفية</button>
+
+<form method="get" class="panel p-4 mb-5 cols" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr));align-items:end">
+  <div>
+    <label class="label" for="c-q">بحث بالاسم أو رقم الهاتف</label>
+    <input id="c-q" type="text" name="q" value="{{ q }}" class="input" placeholder="الاسم أو الهاتف">
+  </div>
+  <div>
+    <label class="label" for="c-sort">الترتيب</label>
+    <select id="c-sort" name="sort" class="select">
+      <option value="spent" {% if sort == "spent" %}selected{% endif %}>الأكثر إنفاقًا</option>
+      <option value="orders" {% if sort == "orders" %}selected{% endif %}>الأكثر طلبًا</option>
+      <option value="last" {% if sort == "last" %}selected{% endif %}>الأحدث</option>
+    </select>
+  </div>
+  <div>
+    <label class="label" for="c-range">الفترة</label>
+    <select id="c-range" name="range" class="select">
+      <option value="all" {% if range == "all" %}selected{% endif %}>كل الوقت</option>
+      <option value="7d" {% if range == "7d" %}selected{% endif %}>آخر 7 أيام</option>
+      <option value="30d" {% if range == "30d" %}selected{% endif %}>آخر 30 يوم</option>
+    </select>
+  </div>
+  <div>
+    <label class="label" for="c-min">الحد الأدنى للطلبات</label>
+    <select id="c-min" name="min_orders" class="select">
+      <option value="" {% if not min_orders %}selected{% endif %}>كل العملاء</option>
+      <option value="1" {% if min_orders == 1 %}selected{% endif %}>1+ طلب</option>
+      <option value="2" {% if min_orders == 2 %}selected{% endif %}>2+ طلب</option>
+      <option value="3" {% if min_orders == 3 %}selected{% endif %}>3+ طلب</option>
+      <option value="5" {% if min_orders == 5 %}selected{% endif %}>5+ طلب</option>
+      <option value="10" {% if min_orders == 10 %}selected{% endif %}>10+ طلب</option>
+    </select>
+  </div>
+  <button class="btn btn-dark">تصفية</button>
 </form>
-<div class="overflow-x-auto rounded bg-white shadow-sm">
-  <table class="w-full min-w-[700px] text-sm">
-    <thead class="bg-slate-100 text-right"><tr>
-      <th class="p-3">العميل</th><th class="p-3">رقم الهاتف</th><th class="p-3">عدد الطلبات</th><th class="p-3">إجمالي المشتريات</th><th class="p-3">أول طلب</th><th class="p-3">آخر طلب</th><th class="p-3">تواصل</th>
-    </tr></thead>
-    <tbody>
-      {% for customer, total_orders, total_spent in customers %}
-      <tr class="border-t">
-        <td class="p-2.5 font-semibold"><a href="/admin/customers/{{ customer.id }}" class="text-emerald-700 underline hover:text-emerald-900">{{ customer.name or "غير مسجل" }}</a></td>
-        <td class="p-3" dir="ltr">{{ customer.phone }}</td>
-        <td class="p-2.5">{{ total_orders }}</td>
-        <td class="p-2.5 font-bold text-emerald-700">{{ total_spent }} {{ settings.currency }}</td>
-        <td class="p-2.5 text-slate-500">{{ customer.first_order_at.strftime("%Y-%m-%d %H:%M") if customer.first_order_at else "" }}</td>
-        <td class="p-2.5 text-slate-500">{{ customer.last_order_at.strftime("%Y-%m-%d %H:%M") if customer.last_order_at else "" }}</td>
-        <td class="p-2.5"><a href="{{ whatsapp_url(customer.phone) }}" target="_blank" rel="noopener" class="rounded-lg bg-[#25D366] px-3 py-1.5 text-xs font-bold text-white">WhatsApp</a></td>
-      </tr>
-      {% else %}<tr><td colspan="7" class="p-4 text-center text-sm text-slate-500">لا يوجد عملاء بعد.</td></tr>{% endfor %}
-    </tbody>
-  </table>
+
+<div class="table-panel">
+  <div class="table-wrap">
+    <table class="admin-table">
+      <thead><tr>
+        <th>العميل</th><th>رقم الهاتف</th><th>عدد الطلبات</th><th>إجمالي المشتريات</th><th>أول طلب</th><th>آخر طلب</th><th>تواصل</th>
+      </tr></thead>
+      <tbody>
+        {% for customer, total_orders, total_spent in customers %}
+        <tr>
+          <td><a href="/admin/customers/{{ customer.id }}" class="cell-main no-underline" style="color:var(--color-primary,#059669)">{{ customer.name or "غير مسجل" }}</a></td>
+          <td class="cell-sub" dir="ltr">{{ customer.phone }}</td>
+          <td class="cell-main">{{ total_orders }}</td>
+          <td class="cell-main" style="color:var(--color-primary,#059669)">{{ total_spent }} {{ settings.currency }}</td>
+          <td class="cell-sub">{{ customer.first_order_at.strftime("%Y-%m-%d %H:%M") if customer.first_order_at else "" }}</td>
+          <td class="cell-sub">{{ customer.last_order_at.strftime("%Y-%m-%d %H:%M") if customer.last_order_at else "" }}</td>
+          <td><a href="{{ whatsapp_url(customer.phone) }}" target="_blank" rel="noopener" class="btn btn-sm btn-whatsapp">WhatsApp</a></td>
+        </tr>
+        {% else %}<tr><td colspan="7" class="p-4 text-center text-sm text-slate-500">لا يوجد عملاء بعد.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}
