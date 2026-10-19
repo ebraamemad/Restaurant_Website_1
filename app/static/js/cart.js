@@ -209,6 +209,39 @@ const AddressStore = {
 };
 window.restaurantAddressStore = AddressStore;
 
+/**
+ * رابط اشتراك Web Push الحالي للمتصفح — أو `null`.
+ *
+ * بنستخدمه عند إنشاء الطلب عشان السيرفر يربط **اشتراك الجهاز ده بعينه**
+ * بالعميل الجديد (`push_endpoint` في `OrderCreate`). من غيره مفيش ربط،
+ * والاشتراك المجهول يفضل مجهول — وده مقصود: ربط "كل الاشتراكات المجهولة"
+ * كان بيسلّم إشعارات عميل لجهاز عميل تاني (SEC-1).
+ *
+ * **مصدر الحقيقة هو `PushSubscription.endpoint` نفسه** اللي اتسجّل بيه
+ * في `push.js`. مش بنخترعه ومش بنمشّيه على أي حاجة تانية:
+ * - لو مفيش اشتراك (`getSubscription()` بترجع `null`) → `null` → بلا ربط.
+ * - لو المتصفح ده مش متعامل مع Service Worker أصلاً → `null`.
+ *
+ * **ليه `getRegistration()` مش `serviceWorker.ready`:** `ready` بتفضل
+ * مستنية لو مفيش Service Worker مسجّل، فكده الطلب نفسه كان هيعلّق.
+ * `getRegistration()` بترجع `undefined` فوراً لو مفيش واحد.
+ */
+async function currentPushEndpoint() {
+  try {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      return null;
+    }
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (!registration || !registration.pushManager) {
+      return null;
+    }
+    const subscription = await registration.pushManager.getSubscription();
+    return subscription ? subscription.endpoint : null;
+  } catch (error) {
+    return null;
+  }
+}
+
 // ===== سلة الصفحة الرئيسية (Alpine) =====
 function storeCart() {
   return {
@@ -598,6 +631,10 @@ function storeCart() {
 
       this.loading = true;
       try {
+        // رابط اشتراك الإشعارات بتاع **المتصفح ده بعينه** (أو `null`).
+        // السيرفر بيربط الاشتراك ده بالعميل الجديد بس — مش كل الاشتراكات
+        // المجهولة (SEC-1). لو مفيش اشتراك، مفيش ربط ومفيش إشعارات.
+        const pushEndpoint = await currentPushEndpoint();
         const resp = await fetch("/orders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -617,6 +654,9 @@ function storeCart() {
             // الطلب بفرع مفعّل قبل ما يحفظه.
             branch_id: this.selectedBranchId,
             channel: this.orderChannel,
+            // رابط اشتراك الإشعارات بتاع المتصفح ده (أو `null`): السيرفر
+            // بيربط الاشتراك ده بالعميل الجديد بس (SEC-1).
+            push_endpoint: pushEndpoint,
             items: this.mappedItems(),
           }),
         });

@@ -671,6 +671,51 @@ class TestCampaignLifecycle:
         assert len(recipients) == 1
         assert recipients[0].customer_id != None
 
+    def test_rebuilding_recipients_does_not_duplicate_push_rows(
+        self, db, make_customer, monkeypatch
+    ):
+        """إعادة بناء المستلمين على **نفس الحملة** ماينفعش تضاعف السطور.
+
+        السيناريو: قناة فشلت في نصها، `send_campaign` رجّعت الحملة
+        `draft` (عشان الأدمن يعيد)، فالأدمن دوس إرسال تاني. من غير
+        الحماية دي كان `_recipient_rows_for` هتبني سطر تاني لنفس
+        الاشتراك → الإشعار يوصل للعميل مرتين. `enqueue_recipients`
+        (واتساب) عندها الحماية دي؛ الـpush كان ناقصها.
+        """
+        make_customer()
+        make_customer()
+        monkeypatch.setattr(marketing.push, "is_configured", lambda: True, raising=False)
+        monkeypatch.setattr(
+            marketing.push,
+            "send_to_subscription",
+            lambda *a, **k: _result(sent=True, status=push.RESULT_SENT),
+            raising=False,
+        )
+        campaign = marketing.create_campaign(
+            db, name="x", title="y", message="z", audience_type="all"
+        )
+        marketing.send_campaign(db, campaign)
+        first = db.scalars(
+            select(CampaignRecipient).where(
+                CampaignRecipient.campaign_id == campaign.id,
+                CampaignRecipient.channel == marketing.CHANNEL_PUSH,
+            )
+        ).all()
+        assert len(first) == 2
+
+        # إعادة الإرسال على نفس الجمهور: مفيش سطر جديد ولا إشعار مكرر.
+        campaign.status = marketing.STATUS_DRAFT
+        db.commit()
+        marketing.send_campaign(db, campaign)
+
+        second = db.scalars(
+            select(CampaignRecipient).where(
+                CampaignRecipient.campaign_id == campaign.id,
+                CampaignRecipient.channel == marketing.CHANNEL_PUSH,
+            )
+        ).all()
+        assert len(second) == 2
+
 
 # ============================================================
 # الـHTTP — الحماية

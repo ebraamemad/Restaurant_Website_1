@@ -225,6 +225,36 @@ class OrderCreate(BaseModel):
     # نفسه NOT NULL في الداتابيز، فمفيش طريقة يفضل فيها طلب من غير فرع.
     branch_id: Optional[int] = Field(default=None, gt=0)
     channel: OrderChannel = OrderChannel.whatsapp
+    # رابط اشتراك Web Push الخاص بالمتصفح اللي بيعمل الطلب ده. اختياري:
+    # لو مبعتش، مفيش ربط خالص (بنكمل بدون إشعارات، والطلب بيفضل زي ما هو).
+    #
+    # الحقل ده بعتّه `cart.js` من `PushSubscription.endpoint` الحالي نفسه،
+    # وبنستخدمه في `public._safe_link_customer_subscriptions` نربط **الاشتراك
+    # ده بعينه** بالعميل — بدل ربط كل الاشتراكات المجهولة، اللي كان بيخلي
+    # متصفح عميل يستقبل إشعارات طلبات عميل تاني (SEC-1).
+    push_endpoint: Optional[str] = Field(default=None, max_length=600)
+
+    @field_validator("push_endpoint")
+    @classmethod
+    def _validate_push_endpoint(cls, value: Optional[str]) -> Optional[str]:
+        """نفس فحوصات `PushSubscriptionIn.endpoint`، بس **بدون رفض الطلب**.
+
+        الاشتراك أصلاً بيتقبل في `/api/push/subscribe` بنفس الفحوصات، فالحقل
+        هنا مجرد "تلميح ربط" — لو جاي بصيغة غلط، بنرجع `None` (بلا ربط)
+        بدل ما نرفض طلب حقيقي بسبب خانة اختيارية. الرفض هو سلوك صح لـ
+        `subscribe` (اللي هو المدخل الوحيد للإشعارات)، مش هنا.
+        """
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        parsed = urlparse(stripped)
+        if parsed.scheme != "https" or not parsed.netloc:
+            return None
+        if not is_allowed_push_endpoint_host(parsed.hostname or ""):
+            return None
+        return stripped
 
 
 class OrderCreated(BaseModel):

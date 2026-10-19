@@ -118,6 +118,33 @@
     </div>
   {% endif %}
 
+  {# ===== موافقة الإشعارات (تسويق بس) ===== #}
+  {# الصفحة دي هي أول ما بيوصلها بعد الطلب — المكان الطبيعي لموافقة
+     الإشعارات. الكارت **مخفي افتراضياً** (`hidden`)؛ مش بيظهر غير لما
+     كل الشروط تتم: المتصفح يدعم Push، والسيرفر يكون VAPID مظبوط،
+     والصفحة على سياق آمن، والمستخدم ماردش. غير كده الكارت يفضل
+     مختفي — مفيش زرار بيدوّس ويلاقي غاز.
+
+     الإذن بيتطلب **من ضغطة الزرار بس** (مش من تحميل الصفحة)، وده
+     شرط المتصفحات أصلاً. ملاحظة: الإشعارات في المرحلة دي **للعروض
+     والخصومات بس** — إشعارات حالة الطلب متوقّفة. #}
+  <div id="push-optin" class="mb-4 rounded-2xl bg-white p-4 shadow-sm" hidden>
+    <p class="mb-1 text-sm font-bold text-slate-700">العروض والخصومات</p>
+    <p class="mb-3 text-xs leading-6 text-slate-500">
+      فعّل الإشعارات عشان يوصلك عروض المطعم الجديدة. مش هننبّهك بحالة الطلب من هنا.
+    </p>
+    <button type="button" id="push-optin-btn" disabled
+            class="w-full rounded-xl px-4 py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-50"
+            style="background: {{ theme.primary }}">
+      تفعيل الإشعارات
+    </button>
+    <button type="button" id="push-optin-off" hidden
+            class="mt-2 w-full rounded-xl px-4 py-2 text-xs font-semibold text-slate-500 transition hover:text-slate-700 disabled:opacity-50">
+      إلغاء الإشعارات على الجهاز ده
+    </button>
+    <p id="push-optin-msg" class="mt-2 min-h-[1rem] text-xs text-slate-500" role="status" aria-live="polite"></p>
+  </div>
+
   <a href="/orders/history"
      class="mb-3 block w-full rounded-xl px-4 py-3 text-center text-sm font-bold text-slate-700 transition hover:bg-slate-50"
      style="background: {{ theme.primary }}14; color: {{ theme.primary }}">
@@ -133,4 +160,106 @@
 
 {% block scripts %}
 <script src="/static/js/track.js" defer></script>
+<script>
+  // كارت الإشعارات — راجع التعليق اللي فوق الكارت نفسه في الـHTML.
+  //
+  // لازم نستنى `DOMContentLoaded`: `push.js` محمّل بـ`defer` في الـbase،
+  // فالسكريبت الـinline ده بينفّذ **قبله** أثناء تحليل الصفحة، والدوال
+  // كانت هتبقى undefined لو ناديناها هنا.
+  document.addEventListener('DOMContentLoaded', () => {
+    const card = document.getElementById('push-optin');
+    const btn = document.getElementById('push-optin-btn');
+    const off = document.getElementById('push-optin-off');
+    const msg = document.getElementById('push-optin-msg');
+    if (!card || !btn || !off || !msg) return;
+    // لو `push.js` مااتحمّلش، الكارت يفضل مخفي وده احترام الوضع.
+    if (
+      typeof getPushState !== 'function' ||
+      typeof enablePush !== 'function' ||
+      typeof disablePush !== 'function'
+    ) {
+      return;
+    }
+
+    // توكن التتبّع بتاع الطلب نفسه موجود في الصفحة (نفس اللي في الرابط).
+    // من غيره الاشتراك بيتسجّل **مجهولاً** (`customer_id` = NULL) وحملات
+    // التسويق ما توصلّهوش أبداً: `marketing._recipient_rows_for` بتجيب
+    // الاشتراكات من جمهور العملاء بس، والاشتراك المجهول مش تابع لأي
+    // عميل. تمرير الـtoken بيربطه فوراً بالعميل — نفس مسار الربط اللي
+    // بيحصل وقت الطلب لو المتصفح بعت `push_endpoint`.
+    const liveStatus = document.getElementById('live-status');
+    const trackingToken = (liveStatus && liveStatus.dataset.token) || '';
+    const tokenOptions = trackingToken ? { token: trackingToken } : {};
+    const statusQuery = trackingToken
+      ? { query: '?token=' + encodeURIComponent(trackingToken) }
+      : {};
+
+    // بيعرض الحالة كما هي. الكارت منطوي من غير `card.hidden = false`،
+    // فالأوامر تحت مش هتظهر غير لما الشروط تتم.
+    function render(state) {
+      if (!state.supported || !state.enabled) return;
+      if (state.subscribed) {
+        btn.disabled = true;
+        btn.textContent = 'الإشعارات مفعّلة على الجهاز ده';
+        off.hidden = false;
+        msg.textContent = '';
+      } else if (state.permission === 'denied') {
+        // ممنوع نعيد السؤال — المتصفح راجع نهائي. نقول له الصراحة.
+        btn.disabled = true;
+        btn.textContent = 'تفعيل الإشعارات';
+        off.hidden = true;
+        msg.textContent = state.reason || 'الإشعارات مقفولة من المتصفح.';
+      } else {
+        btn.disabled = false;
+        btn.textContent = 'تفعيل الإشعارات';
+        off.hidden = true;
+        msg.textContent = '';
+      }
+      card.hidden = false;
+    }
+
+    getPushState(statusQuery)
+      .then(render)
+      .catch(() => {
+        // السيرفر مش راد أو فشل الفحص — نفضل مخفيين بدل زرار ميت.
+      });
+
+    // الاشتراك (من ضغطة زرار بس).
+    btn.addEventListener('click', () => {
+      btn.disabled = true;
+      msg.textContent = 'ثانية واحدة…';
+      enablePush(tokenOptions)
+        .then(() => {
+          btn.disabled = true;
+          btn.textContent = 'الإشعارات مفعّلة على الجهاز ده';
+          off.hidden = false;
+          msg.textContent = 'تمام — هيوصلك عروض المطعم الجديدة.';
+        })
+        .catch((error) => {
+          btn.disabled = false;
+          msg.textContent =
+            error && error.message ? error.message : 'مقدرنا نفعّل الإشعارات حاليًا.';
+        });
+    });
+
+    // إلغاء الاشتراك — بنفس الـtoken، وإلا السيرفر بيرفض (الاشتراك
+    // مربوط بالعميل ده بالفعل).
+    off.addEventListener('click', () => {
+      off.hidden = true;
+      btn.disabled = true;
+      msg.textContent = 'ثانية واحدة…';
+      disablePush(tokenOptions)
+        .then(() => {
+          btn.disabled = false;
+          btn.textContent = 'تفعيل الإشعارات';
+          msg.textContent = 'اتلغت الإشعارات على الجهاز ده.';
+        })
+        .catch((error) => {
+          btn.disabled = false;
+          msg.textContent =
+            error && error.message ? error.message : 'مقدرنا نلغي الإشعارات حاليًا.';
+        });
+    });
+  });
+</script>
 {% endblock %}

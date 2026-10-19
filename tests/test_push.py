@@ -1803,8 +1803,15 @@ class TestOrderFlowNeverFailsFromPush:
     def test_status_change_is_saved_when_push_explodes(
         self, client, db, vapid_on, admin_user, monkeypatch, menu
     ):
-        """تغيير الحالة يتحفظ حتى لو الإشعار رمي استثناءً."""
-        from app.models import Order
+        """تغيير الحالة يتحفظ حتى لو الإشعار رمي استثناءً.
+
+        **بنفعّل مفتاح إشعارات الحالة يدوياً** هنا: الافتراضي في
+        المرحلة دي إنها **متوقّفة**، والاختبار ده بيحمي المسار لما
+        يتفعّل في مرحلة جاية. من غير التفعيل اليدوي،
+        `_safe_notify_customer` بتخرج قبل أي نداء والإرسال مايتجرّبش
+        أصلاً — الاختبار يبقى بلا معنى.
+        """
+        from app.models import Order, PushSubscription
         from app.security import AUTH_COOKIE_NAME, create_access_token
 
         created = client.post(
@@ -1812,6 +1819,16 @@ class TestOrderFlowNeverFailsFromPush:
         )
         assert created.status_code in (200, 201), created.text
         order_id = created.json()["order_id"]
+        tracking_token = created.json()["tracking_token"]
+
+        # لازم يكون فيه اشتراك **مربوط بالعميل**، وإلا
+        # `subscriptions_for_order` بترجع فاضية والـexplode مايتنادى أصلاً.
+        body = _subscribe_body()
+        body["endpoint"] = "https://fcm.googleapis.com/fcm/send/status-explode"
+        body["token"] = tracking_token
+        assert client.post("/api/push/subscribe", json=body).status_code == 200
+        bound = db.scalar(select(PushSubscription))
+        assert bound is not None and bound.customer_id is not None
 
         client.cookies.set(AUTH_COOKIE_NAME, create_access_token(admin_user.username))
         from app.security import CSRF_COOKIE_NAME, create_csrf_token
@@ -1821,7 +1838,12 @@ class TestOrderFlowNeverFailsFromPush:
 
         import app.push as push_module
 
+        monkeypatch.setattr(push_module, "ORDER_STATUS_PUSH_ENABLED", True)
+
+        calls = {"n": 0}
+
         def explode(*args, **kwargs):
+            calls["n"] += 1
             raise RuntimeError("push module is on fire")
 
         monkeypatch.setattr(push_module, "send_and_commit", explode)
@@ -1832,8 +1854,73 @@ class TestOrderFlowNeverFailsFromPush:
             follow_redirects=False,
         )
         assert response.status_code in (302, 303)
+        # الإرسال اتجرّب فعلاً (ورمى) — يعني الاختبار مش بيمرّ بالحظ.
+        assert calls["n"] == 1
 
         order = db.get(Order, order_id)
+        assert order.status == "confirmed"
+
+    def test_status_change_does_not_notify_customer_by_default(
+        self, client, db, vapid_on, admin_user, monkeypatch, menu
+    ):
+        """المرحلة دي: تغيير الحالة **مايابعتش** Push للعميل خالص.
+
+        الـPush للتسويق بس. حتى مع اشتراك نشط مربوط بالعميل، تغيير
+        الحالة ماينفعش ينده `send_and_commit` ولا حتى `subscriptions_for_order`
+        — الدالة بتخرج من أول فحص للمفتاح.
+        """
+        from app.models import Order, PushSubscription
+        from app.security import AUTH_COOKIE_NAME, create_access_token
+
+        created = client.post(
+            "/orders", json=_menu_order_payload("01133333333", menu.id)
+        )
+        assert created.status_code in (200, 201), created.text
+        order_id = created.json()["order_id"]
+        tracking_token = created.json()["tracking_token"]
+
+        body = _subscribe_body()
+        body["endpoint"] = "https://fcm.googleapis.com/fcm/send/status-default-off"
+        body["token"] = tracking_token
+        assert client.post("/api/push/subscribe", json=body).status_code == 200
+        bound = db.scalar(select(PushSubscription))
+        assert bound is not None and bound.customer_id is not None
+
+        import app.push as push_module
+
+        # المفتاح في حالته الافتراضية (متوقّف) — ده اللي بنختبره.
+        assert push_module.ORDER_STATUS_PUSH_ENABLED is False
+
+        client.cookies.set(AUTH_COOKIE_NAME, create_access_token(admin_user.username))
+        from app.security import CSRF_COOKIE_NAME, create_csrf_token
+
+        csrf = create_csrf_token()
+        client.cookies.set(CSRF_COOKIE_NAME, csrf)
+
+        calls = {"send": 0, "subs": 0}
+        real_send = push_module.send_and_commit
+        real_subs = push_module.subscriptions_for_order
+
+        def spy_send(*a, **k):
+            calls["send"] += 1
+            return real_send(*a, **k)
+
+        def spy_subs(*a, **k):
+            calls["subs"] += 1
+            return real_subs(*a, **k)
+
+        monkeypatch.setattr(push_module, "send_and_commit", spy_send)
+        monkeypatch.setattr(push_module, "subscriptions_for_order", spy_subs)
+
+        response = client.post(
+            f"/admin/orders/{order_id}/status",
+            data={"status_value": "confirmed", "csrf_token": csrf},
+            follow_redirects=False,
+        )
+        assert response.status_code in (302, 303)
+        assert calls == {"send": 0, "subs": 0}
+
+        order = db.scalar(select(Order).where(Order.id == order_id))
         assert order.status == "confirmed"
 
     def test_status_history_row_is_written_on_creation(
@@ -1852,6 +1939,196 @@ class TestOrderFlowNeverFailsFromPush:
         assert len(rows) == 1
         assert rows[0].status == "pending"
         assert rows[0].synthetic is False
+
+
+class TestOrderClaimsOnlyItsOwnPushEndpoint:
+    """SEC-1 — الطلب بيربط اشتراك **متصفحه هو**، مش كل الاشتراكات المجهولة.
+
+    القديم: `create_order` كان بيحدّث كل صف `customer_id IS NULL AND
+    admin_id IS NULL` — يعني أول عميل يعمل طلب كان بيستولي على كل اشتراك
+    مجهول، فجهازه هو اللي كان بيوصله إشعارات طلبات ناس تانية.
+
+    الجديد: `OrderCreate.push_endpoint` اختياري، والمتصفح بيبعت فيه رابط
+    اشتراك **الـ`PushSubscription.endpoint` الحالي نفسه** (`cart.js`)،
+    والسيرفر بيحدّث الصف اللي مطابق **له** بس، وبرضه شرط إنه لسه مجهول.
+    مفيش `push_endpoint` = مفيش ربط.
+    """
+
+    def test_order_links_only_the_submitted_endpoint(
+        self, client, db, vapid_on, menu, make_subscription
+    ):
+        """اشتراكين مجهولين (جهازين): طلب بـendpoint A يربط A بس."""
+        from app.models import PushSubscription
+
+        browser_a = make_subscription(endpoint="https://fcm.googleapis.com/fcm/send/anonymous-a")
+        browser_b = make_subscription(endpoint="https://fcm.googleapis.com/fcm/send/anonymous-b")
+        db.commit()
+
+        payload = _menu_order_payload("01200000001", menu.id)
+        payload["push_endpoint"] = browser_a.endpoint
+        created = client.post("/orders", json=payload)
+        assert created.status_code in (200, 201), created.text
+
+        row_a = db.get(PushSubscription, browser_a.id)
+        row_b = db.get(PushSubscription, browser_b.id)
+        assert row_a.customer_id is not None  # ارتبط بصاحب الطلب
+        assert row_b.customer_id is None  # جهاز تاني — لسه مجهول
+
+    def test_order_with_endpoint_a_cannot_claim_endpoint_b(
+        self, client, db, vapid_on, menu, make_subscription
+    ):
+        """حتى لو B موجود، طلب بـA مش يلمسه — وطلب B بعدين يربطه بصاحبه."""
+        from app.models import PushSubscription
+
+        browser_a = make_subscription(endpoint="https://fcm.googleapis.com/fcm/send/xclaim-a")
+        browser_b = make_subscription(endpoint="https://fcm.googleapis.com/fcm/send/xclaim-b")
+        db.commit()
+
+        payload_a = _menu_order_payload("01200000002", menu.id)
+        payload_a["push_endpoint"] = browser_a.endpoint
+        created_a = client.post("/orders", json=payload_a)
+        assert created_a.status_code in (200, 201), created_a.text
+        customer_a = db.get(PushSubscription, browser_a.id).customer_id
+        assert customer_a is not None
+
+        # B لسه مجهول، وبعدين جهاز B بطلب **خاص بيه** — يربطه بعميله هو.
+        assert db.get(PushSubscription, browser_b.id).customer_id is None
+
+        payload_b = _menu_order_payload("01200000003", menu.id)
+        payload_b["push_endpoint"] = browser_b.endpoint
+        created_b = client.post("/orders", json=payload_b)
+        assert created_b.status_code in (200, 201), created_b.text
+
+        row_b = db.get(PushSubscription, browser_b.id)
+        assert row_b.customer_id is not None
+        assert row_b.customer_id != customer_a  # مفيش cross-link في أي اتجاه
+
+    def test_order_without_push_endpoint_links_nothing(
+        self, client, db, vapid_on, menu, make_subscription
+    ):
+        """من غير `push_endpoint` في الجسم: مفيش ربط خالص (الافتراضي الآمن)."""
+        from app.models import PushSubscription
+
+        orphan_a = make_subscription(endpoint="https://fcm.googleapis.com/fcm/send/orphan-a")
+        orphan_b = make_subscription(endpoint="https://fcm.googleapis.com/fcm/send/orphan-b")
+        db.commit()
+
+        created = client.post("/orders", json=_menu_order_payload("01200000004", menu.id))
+        assert created.status_code in (200, 201), created.text
+
+        assert db.get(PushSubscription, orphan_a.id).customer_id is None
+        assert db.get(PushSubscription, orphan_b.id).customer_id is None
+
+    def test_admin_subscription_is_never_linked_by_order(
+        self, client, db, vapid_on, menu, make_subscription, new_admin_id
+    ):
+        """حتى لو الطلب بعت endpoint بتاع أدمن: صف الأدمن لسه ملكه هو.
+
+        شرط `admin_id IS NULL` هو الحارس — اشتراك الأدمن مالوش علاقة
+        بعملاء الموقع أبداً.
+        """
+        from app.models import PushSubscription
+
+        admin_id = new_admin_id()
+        admin_sub = make_subscription(
+            endpoint="https://fcm.googleapis.com/fcm/send/admin-owned",
+            admin_id=admin_id,
+        )
+        anonymous = make_subscription(endpoint="https://fcm.googleapis.com/fcm/send/nearby-anon")
+        db.commit()
+
+        payload = _menu_order_payload("01200000005", menu.id)
+        payload["push_endpoint"] = admin_sub.endpoint
+        created = client.post("/orders", json=payload)
+        assert created.status_code in (200, 201), created.text
+
+        admin_row = db.get(PushSubscription, admin_sub.id)
+        assert admin_row.admin_id == admin_id  # ما اتغيرش
+        assert admin_row.customer_id is None  # ماتربطش بعميل
+        # والاشتراك المجهول القريب كمان ما اتلمسش (endpoint مختلف)
+        assert db.get(PushSubscription, anonymous.id).customer_id is None
+
+    def test_valid_tracking_token_still_binds_subscription(
+        self, client, db, vapid_on, menu
+    ):
+        """مسار التأكيد بالـtoken لسه شغّال — ده الشرعي للإشعارات.
+
+        العميل بيجي بعدين من صفحة التتبّع بتوكن طلبه، فيشترك بالإشعارات،
+        والسيرفر بيربط اشتراكه هو بالعميل بتاعه هو — من غير أي `push_endpoint`
+        في الطلب الأصلي.
+        """
+        from app.models import PushSubscription
+
+        created = client.post(
+            "/orders", json=_menu_order_payload("01200000006", menu.id)
+        )
+        assert created.status_code in (200, 201), created.text
+        tracking_token = created.json()["tracking_token"]
+
+        body = _subscribe_body()
+        body["endpoint"] = "https://fcm.googleapis.com/fcm/send/token-path-endpoint"
+        body["token"] = tracking_token
+        response = client.post("/api/push/subscribe", json=body)
+        assert response.status_code == 200, response.text
+
+        order_customer_id = db.scalar(select(PushSubscription)).customer_id
+        assert order_customer_id is not None
+
+    def test_unsubscribe_with_tracking_token_still_works_after_link(
+        self, client, db, vapid_on, menu
+    ):
+        """الربط الجديد مايكسرش الإلغاء: اشترك → طلب بيربط → إلغاء بالتوكن."""
+        from app.models import PushSubscription
+
+        body = _subscribe_body()
+        body["endpoint"] = "https://fcm.googleapis.com/fcm/send/unsub-after-link"
+        assert client.post("/api/push/subscribe", json=body).status_code == 200
+
+        payload = _menu_order_payload("01200000007", menu.id)
+        payload["push_endpoint"] = body["endpoint"]
+        created = client.post("/orders", json=payload)
+        assert created.status_code in (200, 201), created.text
+        tracking_token = created.json()["tracking_token"]
+        assert db.scalar(select(PushSubscription)).customer_id is not None
+
+        response = client.post(
+            "/api/push/unsubscribe",
+            json={"endpoint": body["endpoint"], "token": tracking_token},
+        )
+        assert response.status_code == 200, response.text
+        assert db.scalar(select(PushSubscription)) is None
+
+    def test_order_with_malformed_push_endpoint_created_and_links_nothing(
+        self, client, db, vapid_on, menu, make_subscription
+    ):
+        """`push_endpoint` بصيغة غلط = بلا ربط، **وبرضه** الطلب يتعمل.
+
+        الخانة اختيارية: من المفروض ماتفشلش طلب حقيقي. والمزوّد الغريب
+        ماينفعش ي match اشتراك مخزّن أصلاً (subscribe بيرفضه قبل كده).
+        """
+        from app.models import PushSubscription
+
+        orphan = make_subscription(endpoint="https://fcm.googleapis.com/fcm/send/malformed-test")
+        db.commit()
+
+        payload = _menu_order_payload("01200000008", menu.id)
+        payload["push_endpoint"] = "https://evil.example/push"
+        created = client.post("/orders", json=payload)
+        assert created.status_code in (200, 201), created.text
+
+        assert db.get(PushSubscription, orphan.id).customer_id is None
+
+    def test_subscribe_endpoint_validation_unchanged(
+        self, client, db, vapid_on
+    ):
+        """فحوصات `subscribe` الأصلية لسه زي ما هي (مفيش regression)."""
+        blank = _subscribe_body()
+        blank["endpoint"] = "   "
+        assert client.post("/api/push/subscribe", json=blank).status_code == 422
+
+        external = _subscribe_body()
+        external["endpoint"] = "https://evil.example/push"
+        assert client.post("/api/push/subscribe", json=external).status_code in (201, 422)
 
 
 # ---- helpers -------------------------------------------------

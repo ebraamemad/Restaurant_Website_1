@@ -477,6 +477,15 @@ def _recipient_rows_for(db: Session, campaign: Campaign, params: AudienceParams)
     رقم دقيق بس مش هيقولنا مين. لما نطلب `MAX+1` سطر بس: لو رجعوا
     كلهم، يبقى فيه أكتر من الحد وبنرفض. لو رجع أقل، يبقى ده
     الجمهور كامل. ذاكرة محدودة وخطأ واضح.
+
+    ## ليه النداء المتكرر **مش** بيضاعف
+
+    إعادة استدعاء الدالة على **نفس الحملة** (retry بعد فشل قناة
+    اتصلّحت، أو double-click على «إرسال») ماينفعش تضيف سطر تاني
+    لنفس الاشتراك. المرسل بيلفّ على `pending` بس، فالسطر الموجود
+    خلاص (اتبعت أو فشل) مش هيتبعت تاني — مفيش إشعار مكرر للعميل.
+    نفس الحماية في `app.whatsapp.service.enqueue_recipients`؛ الفرق
+    إن الـpush بيفتكر في **الجهاز**، وواتساب في **الرقم**.
     """
     customer_ids = audience_customer_ids(
         db,
@@ -508,6 +517,20 @@ def _recipient_rows_for(db: Session, campaign: Campaign, params: AudienceParams)
     if not subs:
         return 0
 
+    # إعادة استدعاء الدالة على **نفس الحملة** ماينفعش تضاعف السطور:
+    # نفس الاشتراك = نفس السطر. بنجيب سطور الـpush الموجودة للحملة
+    # ونتجاهل أي اشتراك عنده سطر أصلاً — فالـretry يكمّل الباقي بس.
+    already_queued = set(
+        db.execute(
+            select(CampaignRecipient.subscription_id).where(
+                CampaignRecipient.campaign_id == campaign.id,
+                CampaignRecipient.channel == CHANNEL_PUSH,
+            )
+        )
+        .scalars()
+        .all()
+    )
+
     customers = {
         c.id: c
         for c in db.execute(select(Customer).where(Customer.id.in_(customer_ids)))
@@ -515,7 +538,10 @@ def _recipient_rows_for(db: Session, campaign: Campaign, params: AudienceParams)
         .all()
     }
 
+    created = 0
     for sub in subs:
+        if sub.id in already_queued:
+            continue
         customer = customers.get(sub.customer_id) if sub.customer_id else None
         db.add(
             CampaignRecipient(
@@ -530,8 +556,9 @@ def _recipient_rows_for(db: Session, campaign: Campaign, params: AudienceParams)
                 status="pending",
             )
         )
+        created += 1
     db.flush()
-    return len(subs)
+    return created
 
 
 def _result_to_status(result: push.SendResult) -> tuple[str, Optional[str]]:

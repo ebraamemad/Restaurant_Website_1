@@ -495,22 +495,36 @@ def _run_in_savepoint(db: Session, label: str, order_id: Optional[int], fn) -> N
             )
 
 
-def _safe_link_customer_subscriptions(db: Session, order: Order) -> None:
-    """يربط اشتراكات المتصفح (من غير `customer_id`) بالعميل الجديد.
+def _safe_link_customer_subscriptions(
+    db: Session, order: Order, push_endpoint: Optional[str] = None
+) -> None:
+    """يربط **اشتراك المتصفح اللي بعت الطلب** (إن وُجد) بالعميل الجديد.
 
     العميل ممكن يكون اشترك في الإشعارات **قبل** ما يعمل أول طلب (الزر
     على الصفحة الرئيسية). الاشتراكات دي بتفضل `customer_id = NULL` لحد
     ما يعمل طلب، وعندها بنربطها هنا.
 
-    **ليه الربط مهم:** من غيره، إشعار "طلبك #12 قيد التجهيز" مش
-    هيلاقي الجهاز خالص.
+    **SEC-1 — ليه الربط بالـendpoint مش "كل حاجة مجهولة":** قبل الإصلاح،
+    الدالة كانت بتحدد كل صف عنده `customer_id IS NULL AND admin_id IS NULL`،
+    يعني أول عميل يعمل طلب كان **بيستولي على كل اشتراك مجهول من أي متصفح
+    تاني** — فجهازه هو اللي كان بيوصله إشعارات طلبات ناس تانية. دلوقتي
+    الربط مربوط **بالـendpoint اللي المتصفح اللي بيعمل الطلب بعته صراحةً**،
+    فبنحدّث صف واحد بالكتير، وبشرط إنه لسه مش مربوط بعميل ولا بأدمن.
+
+    **مفيش `push_endpoint` = مفيش ربط:** الاشتراك المجهول يفضل مجهول لحد
+    ما صاحبه يفتح صفحة التتبّع ويتأكّد (مسار `api.push_subscribe` بالـ
+    token)، وده هو المسار الشرعي الوحيد.
     """
     from sqlalchemy import update
+
+    if not push_endpoint or order.customer_id is None:
+        return
 
     def _work() -> None:
         result = db.execute(
             update(PushSubscription)
             .where(
+                PushSubscription.endpoint == push_endpoint,
                 PushSubscription.customer_id.is_(None),
                 PushSubscription.admin_id.is_(None),
             )
@@ -804,13 +818,15 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderCr
     #    قناة تواصل مش مصدر حقيقة، فالطلب لازم يكون موجود قبل أي رسالة.
     is_whatsapp = payload.channel == OrderChannel.whatsapp
 
-    # 10) سطر الحالة الأولى + ربط اشتراكات المتصفح بالعميل — قبل الـcommit
-    #     عشان السطر والطلب يتحفظوا في معاملة واحدة.
+    # 10) سطر الحالة الأولى + ربط اشتراك متصفح الطلب **ذاته** بالعميل —
+    #     قبل الـcommit عشان السطر والطلب يتحفظوا في معاملة واحدة.
     #
     #     `_safe_*` helpers دي **ما بيرميوش استثناءات أبداً**: فشلت هنا
-    #     معناه الطلب اتسجل من غير سجل حالة أو من غير ربط اشتراكات، ومش
-    #     معناه إن العميل خسر طلبه.
-    _safe_link_customer_subscriptions(db, order)
+    #     معناه الطلب اتسجل من غير سجل حالة أو من غير ربط اشتراك، ومش
+    #     معناه إن العميل خسر طلبه. الربط نفسه بيشتغل بس مع الـ
+    #     `push_endpoint` اللي المتصفح بعته (SEC-1 — مش كل الاشتراكات
+    #     المجهولة).
+    _safe_link_customer_subscriptions(db, order, payload.push_endpoint)
     _safe_record_status(db, order, order.status)
 
     db.commit()

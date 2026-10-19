@@ -20,6 +20,12 @@ from app.models import RestaurantSettings
 ALLOWED_IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 MAX_IMAGE_SIZE = 3 * 1024 * 1024
 
+# كود الاتصال المصري من غير `+` — نفس قيمة `DIALABLE_PREFIX` في
+# `app.whatsapp.service`. بنكرّرها هنا مش بنستوردها: حزمة `app.whatsapp`
+# بتستورد `app.marketing` اللي بيستورد الملف ده، فاستيرادنا ليها هيعمل
+# circular import من غير أي داعي.
+EGYPT_DIALABLE_PREFIX = "20"
+
 PAYMENT_METHOD_LABELS = {
     "cash": "كاش",
     "ewallet": "محفظة إلكترونية",
@@ -235,6 +241,18 @@ def build_whatsapp_message(
 
 
 def build_whatsapp_url(phone_number: str, message: str) -> str:
+    """رابط click-to-chat لرقم **المطعم** (مش العميل).
+
+    الشكل النهائي لازم يكون `wa.me/<E.164 من غير +>`. لو الرقم متخزن
+    بالشكل المحلي (`01012345678`) وسِبناه زي ما هو، `wa.me` بيفتح شات
+    **غير صالح** والعميل مايقدرش يبعت طلبه خالص — وهو ده شكل الرقم اللي
+    نموذج الإعدادات (و`validate_customer_phone`) بيقبله عادي، فالحالة دي
+    متجاهشة مش حالة نادرة.
+
+    `+` / `00` زي ما همّا (أصل ده أصل رقم دولي مكتوب صراحة)، والباقي
+    بنوحده بـ`normalize_phone` + كود مصر بس لو فعلاً موبايل مصري — أي
+    رقم تاني بيروح زي ما هو من غير تخمين.
+    """
     cleaned = (phone_number or "").strip()
     if not cleaned:
         return ""
@@ -248,7 +266,11 @@ def build_whatsapp_url(phone_number: str, message: str) -> str:
     elif cleaned.startswith("00"):
         normalized_phone = f"+{digits[2:]}"
     else:
-        normalized_phone = digits
+        national = normalize_phone(digits)
+        if is_valid_egypt_phone(national):
+            normalized_phone = f"{EGYPT_DIALABLE_PREFIX}{national}"
+        else:
+            normalized_phone = digits
 
     return f"https://wa.me/{quote(normalized_phone, safe='')}?text={quote(message, safe='')}"
 
